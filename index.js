@@ -896,7 +896,7 @@ function SpringBox({ active, alignRight, children }) {
 
 // src/ui/Rows.tsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
-var BASE_FONT = 32;
+var BASE_FONT = 34;
 var FADE_IN_SECONDS = 0.45;
 function seekTo(seconds) {
   try {
@@ -1098,8 +1098,8 @@ function FadeIn({ children }) {
 }
 function Artwork({ image }) {
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(FadeIn, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 1, size: 1100, scale: 1.12, turnSeconds: 63, reverse: false, driftX: 150, driftY: 190, driftSeconds: 48 }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 0.38, size: 1e3, scale: 1.12, turnSeconds: 84, reverse: true, startDeg: 115, driftX: 130, driftY: 170, driftSeconds: 57 })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 150, opacity: 1, size: 1100, scale: 1.12, turnSeconds: 63, reverse: false, driftX: 150, driftY: 190, driftSeconds: 48 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 150, opacity: 0.38, size: 1e3, scale: 1.12, turnSeconds: 84, reverse: true, startDeg: 115, driftX: 130, driftY: 170, driftSeconds: 57 })
   ] });
 }
 function Background({ color, trackId, image }) {
@@ -1179,10 +1179,10 @@ function Header({ title, artist, image }) {
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
     image ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 19, fontWeight: "500" }, children: title }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.View, { style: { width: 12, height: 12, marginTop: -5, borderRightWidth: 2, borderBottomWidth: 2, borderColor: COLORS.secondary, transform: [{ rotate: "45deg" }] } }) })
   ] });
 }
 function Notice({ message, onRetry }) {
@@ -1258,7 +1258,7 @@ function SyncedLyrics({ display, prefs }) {
       initialNumToRender: 8,
       windowSize: 4,
       estimatedItemSize: 130,
-      contentContainerStyle: { paddingHorizontal: 16, paddingTop: 30 },
+      contentContainerStyle: { paddingHorizontal: 24, paddingTop: 30 },
       ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Credits, { writers: display.writers, credit: display.credit })
     }
   );

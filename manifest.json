@@ -2,7 +2,7 @@
   "id": "dev.spicylyrics.spotifyplus",
   "name": "Spicy Lyrics",
   "description": "Synced lyrics for the full-screen lyrics page with a blurred, slowly turning album-art background. Word-by-word from the Spicy Lyrics or SpotifyPlus lyrics service, with a line-synced LRCLIB backup. Unofficial port of Spicy Lyrics by Spikerko.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "main": "index.js",
   "author": [
     {
