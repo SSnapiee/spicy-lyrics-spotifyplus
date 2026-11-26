@@ -39,6 +39,7 @@ var DEFAULT_PREFS = {
   useBeautifulSource: true,
   timingOffsetMs: 250,
   animatedBackground: true,
+  springMotion: false,
   apiVersion: "5.22.3"
 };
 var KEYS = Object.keys(DEFAULT_PREFS);
@@ -927,7 +928,7 @@ function VocalRowBase({ line, activeUntil, prefs }) {
   const showRomanized = prefs.showRomanization && !!line.romanized && line.romanized !== line.text;
   const showTranslated = prefs.showTranslation && !!line.translated;
   const showBackground = prefs.showBackgroundVocals && !!line.background;
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(SpringBox, { active: state === "active", alignRight, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  const body = /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
     import_react4.Pressable,
     {
       onPress: () => seekTo(line.start),
@@ -952,7 +953,8 @@ function VocalRowBase({ line, activeUntil, prefs }) {
         showTranslated && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 6, textAlign }, children: line.translated })
       ]
     }
-  ) });
+  );
+  return prefs.springMotion ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(SpringBox, { active: state === "active", alignRight, children: body }) : body;
 }
 var VocalRow = (0, import_react3.memo)(VocalRowBase);
 function InterludeRowBase({ line, activeUntil, prefs }) {
@@ -1167,7 +1169,7 @@ function goBack() {
   }
 }
 function Header({ title, artist, image }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 58, paddingBottom: 10 }, children: [
     image ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 19, fontWeight: "500" }, children: title }),
@@ -1351,6 +1353,13 @@ function registerSettings() {
           label: "Animated background",
           description: "Slowly moving coloured glow behind the lyrics.",
           value: prefs.animatedBackground
+        },
+        {
+          id: "springMotion",
+          type: "toggle",
+          label: "Springy line motion",
+          description: "The current line grows with a small bounce. Turn off if text looks glitchy.",
+          value: prefs.springMotion
         },
         {
           id: "useBeautifulSource",

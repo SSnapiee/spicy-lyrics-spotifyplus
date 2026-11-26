@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.5.9, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.5.11, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -34,6 +34,8 @@ effect: the desktop one is a shader. The word highlight is a stepwise fade (abou
 
 ## Changelog
 
+- 0.5.11: header moved down so the song title is not hidden behind the status bar.
+- 0.5.10: springy line motion is now a setting, off by default (it can make text look glitchy).
 - 0.5.9: gentler bounce, text size 40.
 - 0.5.8: the word being sung bounces (hops up and swells slightly).
 - 0.5.7: bigger text (38), smoother word-by-word fill with glow and a small lift on the word being sung.
