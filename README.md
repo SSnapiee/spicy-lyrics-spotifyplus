@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.5.6, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.5.7, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -34,6 +34,7 @@ effect: the desktop one is a shader. The word highlight is a stepwise fade (abou
 
 ## Changelog
 
+- 0.5.7: bigger text (38), smoother word-by-word fill with glow and a small lift on the word being sung.
 - 0.5.6: line-synced lyrics light up as a whole line (no estimated word-by-word fill).
 - 0.5.5: line-synced lyrics now fill across most of each line instead of finishing early.
 - 0.5.4: much softer background blur, wider side margins, slightly bigger text, chevron header.

@@ -473,7 +473,7 @@ var import_spotifyplus6 = require("spotifyplus");
 
 // src/clock.ts
 var import_spotifyplus3 = require("spotifyplus");
-var TICK_MS = 50;
+var TICK_MS = 40;
 var SYNC_MS = 500;
 var PlaybackClock = class {
   constructor() {
@@ -738,7 +738,7 @@ function usePrefs() {
 function rowSnapshot(position, start, activeUntil) {
   if (position < start) return 0;
   if (position >= activeUntil) return 1;
-  return 2 + Math.floor((position - start) * 16);
+  return 2 + Math.floor((position - start) * 24);
 }
 function useRowSnapshot(start, activeUntil) {
   const get = () => rowSnapshot(clock.now(), start, activeUntil);
@@ -881,7 +881,7 @@ function SpringBox({ active, alignRight, children }) {
 
 // src/ui/Rows.tsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
-var BASE_FONT = 34;
+var BASE_FONT = 38;
 var FADE_IN_SECONDS = 0.45;
 function seekTo(seconds) {
   try {
@@ -902,7 +902,9 @@ function VocalRowBase({ line, activeUntil, prefs }) {
   const syllableMode = state === "active" && prefs.animateSyllables && !!line.words && line.words.length > 0;
   const lead = syllableMode ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { flexDirection: "row", flexWrap: "wrap", justifyContent: align }, children: line.words.map((word, wordIndex) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { flexDirection: "row" }, children: word.syllables.map((syllable, syllableIndex) => {
     const last = syllableIndex === word.syllables.length - 1;
-    const fill = easeOut(progress(position, syllable.start, syllable.end));
+    const raw = progress(position, syllable.start, syllable.end);
+    const fill = easeOut(raw);
+    const glow = Math.sin(Math.PI * raw);
     return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       import_react4.Text,
       {
@@ -910,7 +912,11 @@ function VocalRowBase({ line, activeUntil, prefs }) {
           color: white(0.4 + 0.6 * fill),
           fontSize,
           fontWeight: "900",
-          textAlign
+          textAlign,
+          textShadowColor: white(0.6 * glow),
+          textShadowOffset: { width: 0, height: 0 },
+          textShadowRadius: 14 * glow,
+          transform: [{ translateY: -fontSize * 0.07 * fill }]
         },
         children: syllable.text + (last && word.space ? " " : "")
       },
