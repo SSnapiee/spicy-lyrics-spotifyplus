@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.5, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.5.3, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -34,6 +34,9 @@ effect: the desktop one is a shader. The word highlight is a stepwise fade (abou
 
 ## Changelog
 
+- 0.5.3: springy line motion like Beautiful Lyrics (active line grows and settles with a spring).
+- 0.5.2: smooth gradient shade (no more hard bands), lighter background, dimmer inactive lines like Beautiful Lyrics.
+- 0.5.1: artwork blur now also uses the GPU blur effect (much stronger and smoother than the canvas blur alone).
 - 0.5.0: background reworked to match Beautiful Lyrics (two drifting layers, 1.4 s cross-fade, gradient shade).
 - 0.4.0: bolder text, more spacing, fade-in, blurred artwork background.
 

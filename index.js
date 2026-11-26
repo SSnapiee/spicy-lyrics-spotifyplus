@@ -467,8 +467,8 @@ async function fetchLyrics(trackId, isCancelled = () => false, meta) {
 }
 
 // src/ui/Page.tsx
-var import_react6 = __toESM(require("react"));
-var import_react7 = require("spotifyplus/react");
+var import_react7 = __toESM(require("react"));
+var import_react8 = require("spotifyplus/react");
 var import_spotifyplus6 = require("spotifyplus");
 
 // src/clock.ts
@@ -735,8 +735,8 @@ var COLORS = {
   background: "#FF0B0B0F",
   surface: "#1FFFFFFF",
   pressed: "#29FFFFFF",
-  future: white(0.38),
-  past: white(0.6),
+  future: white(0.3),
+  past: white(0.3),
   active: white(1),
   unsung: white(0.4),
   secondary: white(0.55),
@@ -864,10 +864,38 @@ function describeFailure(reason, httpStatus, detail) {
 }
 
 // src/ui/Rows.tsx
-var import_react2 = require("react");
-var import_react3 = require("spotifyplus/react");
+var import_react3 = require("react");
+var import_react4 = require("spotifyplus/react");
 var import_spotifyplus5 = require("spotifyplus");
+
+// src/ui/SpringBox.tsx
+var import_react2 = require("react");
+var import_animated = __toESM(require("spotifyplus/react/animated"));
 var import_jsx_runtime = require("react/jsx-runtime");
+var MASS = 0.9;
+var STIFFNESS = 90;
+var DAMPING = 15;
+var INACTIVE_SCALE = 0.95;
+var LIFT = 8;
+function SpringBox({ active, alignRight, children }) {
+  const v = import_animated.default.useAnimatedValue(active ? 1 : 0);
+  (0, import_react2.useEffect)(() => {
+    const motion = import_animated.default.spring(v, { toValue: active ? 1 : 0, mass: MASS, stiffness: STIFFNESS, damping: DAMPING, useNativeDriver: true });
+    motion.start();
+    return () => motion.stop();
+  }, [v, active]);
+  const style = {
+    transformOrigin: alignRight ? "right center" : "left center",
+    transform: [
+      { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [LIFT, 0] }) },
+      { scale: v.interpolate({ inputRange: [0, 1], outputRange: [INACTIVE_SCALE, 1] }) }
+    ]
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_animated.default.View, { style, children });
+}
+
+// src/ui/Rows.tsx
+var import_jsx_runtime2 = require("react/jsx-runtime");
 var BASE_FONT = 32;
 var FADE_IN_SECONDS = 0.45;
 function seekTo(seconds) {
@@ -885,13 +913,13 @@ function VocalRowBase({ line, activeUntil, prefs }) {
   const align = alignRight ? "flex-end" : "flex-start";
   const textAlign = alignRight ? "right" : "left";
   const position = clock.now();
-  const lineColor = state === "active" ? white(0.38 + 0.62 * easeOut(progress(position, line.start, line.start + FADE_IN_SECONDS))) : state === "past" ? COLORS.past : COLORS.future;
+  const lineColor = state === "active" ? white(0.3 + 0.7 * easeOut(progress(position, line.start, line.start + FADE_IN_SECONDS))) : state === "past" ? COLORS.past : COLORS.future;
   const syllableMode = state === "active" && prefs.animateSyllables && !!line.words && line.words.length > 0;
-  const lead = syllableMode ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row", flexWrap: "wrap", justifyContent: align }, children: line.words.map((word, wordIndex) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row" }, children: word.syllables.map((syllable, syllableIndex) => {
+  const lead = syllableMode ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { flexDirection: "row", flexWrap: "wrap", justifyContent: align }, children: line.words.map((word, wordIndex) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { flexDirection: "row" }, children: word.syllables.map((syllable, syllableIndex) => {
     const last = syllableIndex === word.syllables.length - 1;
     const fill = easeOut(progress(position, syllable.start, syllable.end));
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-      import_react3.Text,
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      import_react4.Text,
       {
         style: {
           color: white(0.4 + 0.6 * fill),
@@ -903,20 +931,20 @@ function VocalRowBase({ line, activeUntil, prefs }) {
       },
       syllableIndex
     );
-  }) }, wordIndex)) }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: lineColor, fontSize, fontWeight: "900", textAlign }, children: line.text });
+  }) }, wordIndex)) }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.Text, { style: { color: lineColor, fontSize, fontWeight: "900", textAlign }, children: line.text });
   const secondaryColor = state === "active" ? COLORS.secondary : white(0.28);
   const showRomanized = prefs.showRomanization && !!line.romanized && line.romanized !== line.text;
   const showTranslated = prefs.showTranslation && !!line.translated;
   const showBackground = prefs.showBackgroundVocals && !!line.background;
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-    import_react3.Pressable,
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(SpringBox, { active: state === "active", alignRight, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+    import_react4.Pressable,
     {
       onPress: () => seekTo(line.start),
       style: { paddingVertical: 20, paddingHorizontal: 8, borderRadius: 18, alignItems: align },
       children: [
         lead,
-        showBackground && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          import_react3.Text,
+        showBackground && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          import_react4.Text,
           {
             style: {
               color: state === "active" ? white(0.7) : white(0.25),
@@ -929,31 +957,31 @@ function VocalRowBase({ line, activeUntil, prefs }) {
             children: line.background
           }
         ),
-        showRomanized && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 6, textAlign }, children: line.romanized }),
-        showTranslated && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 6, textAlign }, children: line.translated })
+        showRomanized && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 6, textAlign }, children: line.romanized }),
+        showTranslated && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 6, textAlign }, children: line.translated })
       ]
     }
-  );
+  ) });
 }
-var VocalRow = (0, import_react2.memo)(VocalRowBase);
+var VocalRow = (0, import_react3.memo)(VocalRowBase);
 function InterludeRowBase({ line, activeUntil, prefs }) {
   const snap = useRowSnapshot(line.start, activeUntil);
-  if (snap < 2) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { height: 22 } });
+  if (snap < 2) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { height: 22 } });
   const t = progress(clock.now(), line.start, line.end);
   const size = 26 * prefs.fontScale;
   const dot = (index) => {
     const local = Math.min(1, Math.max(0, t * 3 - index));
     return white(0.25 + 0.75 * easeOut(local));
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row", paddingVertical: 20, paddingHorizontal: 12 }, children: [0, 1, 2].map((index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: dot(index), fontSize: size, marginRight: 8 }, children: "\u25CF" }, index)) });
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.View, { style: { flexDirection: "row", paddingVertical: 20, paddingHorizontal: 12 }, children: [0, 1, 2].map((index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react4.Text, { style: { color: dot(index), fontSize: size, marginRight: 8 }, children: "\u25CF" }, index)) });
 }
-var InterludeRow = (0, import_react2.memo)(InterludeRowBase);
+var InterludeRow = (0, import_react3.memo)(InterludeRowBase);
 
 // src/ui/Background.tsx
-var import_react4 = __toESM(require("react"));
-var import_react5 = require("spotifyplus/react");
-var import_animated = __toESM(require("spotifyplus/react/animated"));
-var import_jsx_runtime2 = require("react/jsx-runtime");
+var import_react5 = __toESM(require("react"));
+var import_react6 = require("spotifyplus/react");
+var import_animated2 = __toESM(require("spotifyplus/react/animated"));
+var import_jsx_runtime3 = require("react/jsx-runtime");
 function hash(text) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
@@ -989,13 +1017,13 @@ function themeFor(color, id) {
 }
 var LAYERS = [1, 0.78, 0.56, 0.36, 0.2];
 function Blob({ size, hue, left, top, dx, dy, grow, durationMs }) {
-  const t = import_animated.default.useAnimatedValue(0);
-  (0, import_react4.useEffect)(() => {
-    const ease = import_animated.Easing.inOut(import_animated.Easing.quad);
-    const loop = import_animated.default.loop(
-      import_animated.default.sequence([
-        import_animated.default.timing(t, { toValue: 1, duration: durationMs, easing: ease, useNativeDriver: true }),
-        import_animated.default.timing(t, { toValue: 0, duration: durationMs, easing: ease, useNativeDriver: true })
+  const t = import_animated2.default.useAnimatedValue(0);
+  (0, import_react5.useEffect)(() => {
+    const ease = import_animated2.Easing.inOut(import_animated2.Easing.quad);
+    const loop = import_animated2.default.loop(
+      import_animated2.default.sequence([
+        import_animated2.default.timing(t, { toValue: 1, duration: durationMs, easing: ease, useNativeDriver: true }),
+        import_animated2.default.timing(t, { toValue: 0, duration: durationMs, easing: ease, useNativeDriver: true })
       ])
     );
     loop.start();
@@ -1014,26 +1042,26 @@ function Blob({ size, hue, left, top, dx, dy, grow, durationMs }) {
       { scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, grow] }) }
     ]
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style, children: LAYERS.map((k) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_animated2.default.View, { pointerEvents: "none", style, children: LAYERS.map((k) => {
     const s = size * k;
     const offset = (size - s) / 2;
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", left: offset, top: offset, width: s, height: s, borderRadius: s / 2, backgroundColor: color } }, k);
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react6.View, { pointerEvents: "none", style: { position: "absolute", left: offset, top: offset, width: s, height: s, borderRadius: s / 2, backgroundColor: color } }, k);
   }) });
 }
 function ArtLayer({ image, blurRadius, opacity, size, scale, turnSeconds, reverse, startDeg = 0, driftX = 0, driftY = 0, driftSeconds = 40 }) {
-  const t = import_animated.default.useAnimatedValue(0);
-  const d = import_animated.default.useAnimatedValue(0);
-  (0, import_react4.useEffect)(() => {
-    const loop = import_animated.default.loop(import_animated.default.timing(t, { toValue: 1, duration: turnSeconds * 1e3, easing: import_animated.Easing.linear, useNativeDriver: true }));
+  const t = import_animated2.default.useAnimatedValue(0);
+  const d = import_animated2.default.useAnimatedValue(0);
+  (0, import_react5.useEffect)(() => {
+    const loop = import_animated2.default.loop(import_animated2.default.timing(t, { toValue: 1, duration: turnSeconds * 1e3, easing: import_animated2.Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [t, turnSeconds]);
-  (0, import_react4.useEffect)(() => {
-    const ease = import_animated.Easing.inOut(import_animated.Easing.sin);
-    const loop = import_animated.default.loop(
-      import_animated.default.sequence([
-        import_animated.default.timing(d, { toValue: 1, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true }),
-        import_animated.default.timing(d, { toValue: 0, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true })
+  (0, import_react5.useEffect)(() => {
+    const ease = import_animated2.Easing.inOut(import_animated2.Easing.sin);
+    const loop = import_animated2.default.loop(
+      import_animated2.default.sequence([
+        import_animated2.default.timing(d, { toValue: 1, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true }),
+        import_animated2.default.timing(d, { toValue: 0, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true })
       ])
     );
     loop.start();
@@ -1051,51 +1079,54 @@ function ArtLayer({ image, blurRadius, opacity, size, scale, turnSeconds, revers
       { scale }
     ]
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-    import_react5.ScriptView,
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react6.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_animated2.default.View, { pointerEvents: "none", style, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    import_react6.ScriptView,
     {
       style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+      renderEffectBlurRadius: blurRadius,
       displayList: [{ type: "image", src: image, x: 0, y: 0, width: "100%", height: "100%", resizeMode: "cover", blurRadius, opacity }]
     }
   ) }) });
 }
 var FADE_MS = 1400;
 function FadeIn({ children }) {
-  const a = import_animated.default.useAnimatedValue(0);
-  (0, import_react4.useEffect)(() => {
-    import_animated.default.timing(a, { toValue: 1, duration: FADE_MS, easing: import_animated.Easing.inOut(import_animated.Easing.quad), useNativeDriver: true }).start();
+  const a = import_animated2.default.useAnimatedValue(0);
+  (0, import_react5.useEffect)(() => {
+    import_animated2.default.timing(a, { toValue: 1, duration: FADE_MS, easing: import_animated2.Easing.inOut(import_animated2.Easing.quad), useNativeDriver: true }).start();
   }, [a]);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: a }, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_animated2.default.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: a }, children });
 }
 function Artwork({ image }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(FadeIn, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 1, size: 1100, scale: 1.12, turnSeconds: 63, reverse: false, driftX: 150, driftY: 190, driftSeconds: 48 }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 0.38, size: 1e3, scale: 1.12, turnSeconds: 84, reverse: true, startDeg: 115, driftX: 130, driftY: 170, driftSeconds: 57 })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(FadeIn, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 1, size: 1100, scale: 1.12, turnSeconds: 63, reverse: false, driftX: 150, driftY: 190, driftSeconds: 48 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 0.38, size: 1e3, scale: 1.12, turnSeconds: 84, reverse: true, startDeg: 115, driftX: 130, driftY: 170, driftSeconds: 57 })
   ] });
 }
 function Background({ color, trackId, image }) {
-  const theme = (0, import_react4.useMemo)(() => themeFor(color, trackId), [color, trackId]);
-  const [shown, setShown] = (0, import_react4.useState)(image ? [image] : []);
-  (0, import_react4.useEffect)(() => {
+  const theme = (0, import_react5.useMemo)(() => themeFor(color, trackId), [color, trackId]);
+  const [shown, setShown] = (0, import_react5.useState)(image ? [image] : []);
+  (0, import_react5.useEffect)(() => {
     if (!image) return;
     setShown((prev) => prev[prev.length - 1] === image ? prev : [...prev.slice(-1), image]);
     const timer = setTimeout(() => setShown((prev) => prev.slice(-1)), FADE_MS + 200);
     return () => clearTimeout(timer);
   }, [image]);
   const fill = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { pointerEvents: "none", style: { ...fill, overflow: "hidden", backgroundColor: theme.base }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 560, hue: theme.hues[0], left: -35, top: -8, dx: 90, dy: 70, grow: 1.18, durationMs: 9e3 }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 500, hue: theme.hues[1], left: 30, top: 35, dx: 80, dy: 100, grow: 1.22, durationMs: 12e3 }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 460, hue: theme.hues[2], left: -20, top: 62, dx: 100, dy: 60, grow: 1.15, durationMs: 15e3 }),
-    shown.map((src) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Artwork, { image: src }, src)),
-    shown.length ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, bottom: "66%", backgroundColor: "#55000000" } }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, top: "34%", bottom: "34%", backgroundColor: "#77000000" } }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, top: "66%", backgroundColor: "#BB000000" } })
-    ] }) : null
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react6.View, { pointerEvents: "none", style: { ...fill, overflow: "hidden", backgroundColor: theme.base }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Blob, { size: 560, hue: theme.hues[0], left: -35, top: -8, dx: 90, dy: 70, grow: 1.18, durationMs: 9e3 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Blob, { size: 500, hue: theme.hues[1], left: 30, top: 35, dx: 80, dy: 100, grow: 1.22, durationMs: 12e3 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Blob, { size: 460, hue: theme.hues[2], left: -20, top: 62, dx: 100, dy: 60, grow: 1.15, durationMs: 15e3 }),
+    shown.map((src) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Artwork, { image: src }, src)),
+    shown.length ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      import_react6.ScriptView,
+      {
+        style: fill,
+        displayList: [{ type: "rect", x: 0, y: 0, width: "100%", height: "100%", fill: { type: "linear", startX: 0, startY: 0, endX: 0, endY: "100%", colors: ["#22000000", "#30000000", "#58000000"], positions: [0, 0.5, 1] } }]
+      }
+    ) : null
   ] });
 }
-var SoftBoundary = class extends import_react4.default.Component {
+var SoftBoundary = class extends import_react5.default.Component {
   constructor() {
     super(...arguments);
     this.state = { failed: false };
@@ -1109,8 +1140,8 @@ var SoftBoundary = class extends import_react4.default.Component {
 };
 
 // src/ui/Page.tsx
-var import_jsx_runtime3 = require("react/jsx-runtime");
-var Boundary = class extends import_react6.default.Component {
+var import_jsx_runtime4 = require("react/jsx-runtime");
+var Boundary = class extends import_react7.default.Component {
   constructor() {
     super(...arguments);
     this.state = { failed: false };
@@ -1124,7 +1155,7 @@ var Boundary = class extends import_react6.default.Component {
   render() {
     if (this.state.failed) {
       const Original = this.props.Original;
-      return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Original, {});
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Original, {});
     }
     return this.props.children;
   }
@@ -1133,9 +1164,9 @@ function SpicyLyricsPage(props) {
   const prefs = usePrefs();
   if (!prefs.enabled) {
     const Original = props.Original;
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Original, {});
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Original, {});
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Boundary, { Original: props.Original, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LyricsScreen, { prefs }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Boundary, { Original: props.Original, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(LyricsScreen, { prefs }) });
 }
 function goBack() {
   try {
@@ -1145,53 +1176,53 @@ function goBack() {
   }
 }
 function Header({ title, artist, image }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
-    image ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
+    image ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
   ] });
 }
 function Notice({ message, onRetry }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 18, fontWeight: "700", textAlign: "center" }, children: message }),
-    onRetry ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-      import_react7.Pressable,
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: COLORS.active, fontSize: 18, fontWeight: "700", textAlign: "center" }, children: message }),
+    onRetry ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      import_react8.Pressable,
       {
         onPress: onRetry,
         style: { marginTop: 18, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22, backgroundColor: COLORS.surface },
-        children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 15, fontWeight: "700" }, children: "Try again" })
+        children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: COLORS.active, fontSize: 15, fontWeight: "700" }, children: "Try again" })
       }
     ) : null
   ] });
 }
 function Credits({ writers, credit }) {
-  if (writers.length === 0 && !credit) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.View, { style: { height: 120 } });
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: [
-    writers.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) : null,
-    credit ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: white(0.5), fontSize: 14, marginTop: writers.length > 0 ? 6 : 0 }, children: credit }) : null
+  if (writers.length === 0 && !credit) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.View, { style: { height: 120 } });
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: [
+    writers.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) : null,
+    credit ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_react8.Text, { style: { color: white(0.5), fontSize: 14, marginTop: writers.length > 0 ? 6 : 0 }, children: credit }) : null
   ] });
 }
 function StaticLyrics({ display, prefs }) {
   const align = display.rtl ? "right" : "left";
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.ScrollView, { style: { flex: 1 }, contentContainerStyle: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 60 }, children: [
-    display.staticLines.map((text, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-      import_react7.Text,
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.ScrollView, { style: { flex: 1 }, contentContainerStyle: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 60 }, children: [
+    display.staticLines.map((text, index) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      import_react8.Text,
       {
         style: { color: COLORS.active, fontSize: 24 * prefs.fontScale, fontWeight: "700", textAlign: align, marginBottom: text ? 10 : 22 },
         children: text
       },
       index
     )),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Credits, { writers: display.writers, credit: display.credit })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Credits, { writers: display.writers, credit: display.credit })
   ] });
 }
 function SyncedLyrics({ display, prefs }) {
-  const listRef = (0, import_react6.useRef)(null);
+  const listRef = (0, import_react7.useRef)(null);
   const lines = display.lines;
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     let last = -2;
     const check = () => {
       const index = findActiveIndex(lines, clock.now());
@@ -1208,16 +1239,16 @@ function SyncedLyrics({ display, prefs }) {
     check();
     return clock.subscribe(check);
   }, [lines]);
-  const renderItem = (0, import_react6.useCallback)(
+  const renderItem = (0, import_react7.useCallback)(
     ({ item, index }) => {
       const next = lines[index + 1];
       const activeUntil = Math.max(item.end, next ? next.start : item.end + 8);
-      return item.kind === "interlude" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(InterludeRow, { line: item, activeUntil, prefs }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(VocalRow, { line: item, activeUntil, prefs });
+      return item.kind === "interlude" ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(InterludeRow, { line: item, activeUntil, prefs }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(VocalRow, { line: item, activeUntil, prefs });
     },
     [lines, prefs]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-    import_react7.FlatList,
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    import_react8.FlatList,
     {
       ref: listRef,
       style: { flex: 1 },
@@ -1228,19 +1259,19 @@ function SyncedLyrics({ display, prefs }) {
       windowSize: 4,
       estimatedItemSize: 130,
       contentContainerStyle: { paddingHorizontal: 16, paddingTop: 30 },
-      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Credits, { writers: display.writers, credit: display.credit })
+      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Credits, { writers: display.writers, credit: display.credit })
     }
   );
 }
 function LyricsScreen({ prefs }) {
   const track = useCurrentTrack();
-  const [attempt, setAttempt] = (0, import_react6.useState)(0);
+  const [attempt, setAttempt] = (0, import_react7.useState)(0);
   const state = useLyrics(trackIdOf(track), attempt, metaOf(track));
   let body;
   if (state.status === "loading") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Notice, { message: "Loading lyrics..." });
+    body = /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Notice, { message: "Loading lyrics..." });
   } else if (state.status === "error") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    body = /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
       Notice,
       {
         message: describeFailure(state.reason, state.httpStatus, state.detail),
@@ -1251,13 +1282,13 @@ function LyricsScreen({ prefs }) {
       }
     );
   } else if (state.display.type === "Static") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(StaticLyrics, { display: state.display, prefs });
+    body = /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(StaticLyrics, { display: state.display, prefs });
   } else {
-    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SyncedLyrics, { display: state.display, prefs }, trackIdOf(track) ?? "none");
+    body = /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(SyncedLyrics, { display: state.display, prefs }, trackIdOf(track) ?? "none");
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, backgroundColor: COLORS.background }, children: [
-    prefs.animatedBackground ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SoftBoundary, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Background, { color: track?.color, trackId: trackIdOf(track), image: track?.album?.image }) }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Header, { title: track?.title ?? "Spicy Lyrics", artist: track?.artist ?? "", image: track?.album?.image }),
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_react8.View, { style: { flex: 1, backgroundColor: COLORS.background }, children: [
+    prefs.animatedBackground ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(SoftBoundary, { children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Background, { color: track?.color, trackId: trackIdOf(track), image: track?.album?.image }) }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Header, { title: track?.title ?? "Spicy Lyrics", artist: track?.artist ?? "", image: track?.album?.image }),
     body
   ] });
 }
