@@ -881,7 +881,7 @@ function SpringBox({ active, alignRight, children }) {
 
 // src/ui/Rows.tsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
-var BASE_FONT = 38;
+var BASE_FONT = 40;
 var FADE_IN_SECONDS = 0.45;
 function seekTo(seconds) {
   try {
@@ -916,7 +916,7 @@ function VocalRowBase({ line, activeUntil, prefs }) {
           textShadowColor: white(0.6 * glow),
           textShadowOffset: { width: 0, height: 0 },
           textShadowRadius: 14 * glow,
-          transform: [{ translateY: -fontSize * 0.13 * (0.35 * fill + 0.65 * glow) }, { scale: 1 + 0.07 * glow }]
+          transform: [{ translateY: -fontSize * 0.06 * (0.35 * fill + 0.65 * glow) }, { scale: 1 + 0.03 * glow }]
         },
         children: syllable.text + (last && word.space ? " " : "")
       },
