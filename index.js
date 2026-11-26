@@ -635,20 +635,6 @@ function addInterludes(lines) {
   }
   return out;
 }
-function estimateWords(text, start, end) {
-  const parts = text.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return void 0;
-  const total = parts.reduce((sum, part) => sum + part.length + 1, 0);
-  const length = Math.max(0, end - start);
-  const window = Math.min(length * 0.95, Math.max(0.6, total * 0.09));
-  let cursor = start;
-  return parts.map((part, index) => {
-    const share = (part.length + 1) / total * window;
-    const word = { syllables: [{ text: part, start: cursor, end: cursor + share }], space: index < parts.length - 1 };
-    cursor += share;
-    return word;
-  });
-}
 function transformLyrics(lyrics) {
   const writers = (lyrics.SongWriters ?? []).filter(Boolean);
   if (lyrics.Type === "Static") {
@@ -673,7 +659,6 @@ function transformLyrics(lyrics) {
         romanized: clean(item.RomanizedText) ?? clean(item.TransliteratedText),
         translated: clean(item.TranslatedText)
       };
-      if (text && !vocal.rtl) vocal.words = estimateWords(text, item.StartTime, item.EndTime);
       lines.push(vocal);
     }
   } else {
