@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.2, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.3, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -18,8 +18,9 @@ under the extension's settings ("Use Spicy Lyrics").
 
 ## Settings
 
-Use Spicy Lyrics, word-by-word highlight, background vocals, romanization, translation, text size, backup lyrics
-(LRCLIB), API client version (advanced), clear lyrics cache.
+Use Spicy Lyrics, word-by-word highlight, background vocals, romanization, translation, text size, lyrics timing
+(ms ahead), animated background, Beautiful Lyrics source, backup lyrics (LRCLIB), API client version (advanced),
+clear lyrics cache.
 
 ## What this version does not have
 
@@ -27,7 +28,8 @@ This is a rewrite for Spotify Plus's native UI, not a copy of the desktop extens
 not here yet: dynamic/animated backgrounds, animated artwork and canvas, the now-playing-bar and sidebar lyrics,
 fullscreen/compact modes, queue view, pop-up lyrics, local lyrics upload and editor, custom themes and fonts, and
 romanization/translation computed on the device (it only shows what the service sends).
-The word highlight is a stepwise fade (about 10 updates a second) instead of a smooth wipe.
+The animated background is a slow glow made of soft shapes, coloured per song, not the desktop's artwork-based dynamic
+background. The word highlight is a stepwise fade (about 10 updates a second) instead of a smooth wipe.
 
 ## Notes
 
@@ -36,6 +38,9 @@ The word highlight is a stepwise fade (about 10 updates a second) instead of a s
 - If the Spicy Lyrics service refuses the request (for example HTTP 418), the page shows the status and what the service
   said, then uses LRCLIB (https://lrclib.net, an open lyrics database) as a backup. Backup lyrics are line-synced only,
   with no word-by-word highlight, and the end of the page says where they came from. Turn this off with "Backup lyrics".
+- Before LRCLIB, the extension also asks the SpotifyPlus lyrics service that the Beautiful Lyrics extension uses
+  (`spotifyplus-api.devon-shoutz.workers.dev`). It often has word-synced lyrics. Turn this off with "Beautiful Lyrics source".
+- If lyrics run behind or ahead of the song, adjust "Lyrics timing" (default 250 ms ahead).
 - No Spicy Lyrics source code is included; this is a fresh implementation that speaks the same API.
 
 Credit: Spicy Lyrics by Spikerko (https://github.com/Spikerko/spicy-lyrics).

@@ -36,6 +36,9 @@ var DEFAULT_PREFS = {
   animateSyllables: true,
   fontScale: 1,
   fallbackLrclib: true,
+  useBeautifulSource: true,
+  timingOffsetMs: 250,
+  animatedBackground: true,
   apiVersion: "5.22.3"
 };
 var KEYS = Object.keys(DEFAULT_PREFS);
@@ -182,6 +185,58 @@ async function fetchFromLrclib(meta, isCancelled = () => false) {
   }
 }
 
+// src/offset.ts
+function applyLyricOffset(lyrics) {
+  const offset = lyrics.LyricOffset;
+  const copy = JSON.parse(JSON.stringify(lyrics));
+  delete copy.LyricOffset;
+  if (copy.Type === "Static" || typeof offset !== "number" || !Number.isFinite(offset) || offset === 0) return copy;
+  const shift = (timed) => {
+    timed.StartTime = Math.max(0, timed.StartTime + offset);
+    timed.EndTime = Math.max(0, timed.EndTime + offset);
+  };
+  shift(copy);
+  if (copy.Type === "Line") {
+    for (const item of copy.Content) shift(item);
+    return copy;
+  }
+  for (const group of copy.Content) {
+    if (group.Type !== "Vocal") {
+      shift(group);
+      continue;
+    }
+    for (const vocal of [group.Lead, ...group.Background ?? []]) {
+      shift(vocal);
+      for (const syllable of vocal.Syllables ?? []) shift(syllable);
+    }
+  }
+  return copy;
+}
+
+// src/beautiful.ts
+var URL_BASE = "https://spotifyplus-api.devon-shoutz.workers.dev/api/lyrics/";
+var TIMEOUT_MS2 = 15e3;
+function isUsable(value) {
+  const v = value;
+  if (!v || typeof v !== "object") return false;
+  if (v.Partial) return false;
+  if (v.Type === "Static") return Array.isArray(v.Lines) && v.Lines.length > 0;
+  if (v.Type === "Line" || v.Type === "Syllable") return Array.isArray(v.Content) && v.Content.length > 0;
+  return false;
+}
+async function fetchFromBeautiful(trackId, isCancelled = () => false) {
+  try {
+    const response = await withTimeout(fetch(URL_BASE + encodeURIComponent(trackId), { headers: { Accept: "application/json" } }), TIMEOUT_MS2);
+    if (isCancelled() || !response.ok) return null;
+    const json = await response.json();
+    if (isCancelled() || !isUsable(json)) return null;
+    const provider = typeof json.source === "string" && json.source.trim() ? String(json.source).trim() : void 0;
+    return { lyrics: applyLyricOffset(json), provider };
+  } catch {
+    return null;
+  }
+}
+
 // src/api.ts
 var API_URL = "https://api.spicylyrics.org/query";
 var CACHE_TTL_MS = 6 * 24 * 60 * 60 * 1e3;
@@ -198,9 +253,9 @@ function readCache(trackId) {
     const entry = import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.read(cachePath(trackId));
     if (entry && typeof entry === "object" && !(entry instanceof Uint8Array)) {
       const e = entry;
-      const source = e.source === "lrclib" ? "lrclib" : "spicy";
-      const ttl = source === "lrclib" ? BACKUP_TTL_MS : CACHE_TTL_MS;
-      if (typeof e.at === "number" && Date.now() - e.at < ttl && isLyrics(e.lyrics)) return { lyrics: e.lyrics, source };
+      const source = e.source === "lrclib" || e.source === "beautiful" ? e.source : "spicy";
+      const ttl = source === "spicy" ? CACHE_TTL_MS : BACKUP_TTL_MS;
+      if (typeof e.at === "number" && Date.now() - e.at < ttl && isLyrics(e.lyrics)) return { lyrics: e.lyrics, source, provider: typeof e.provider === "string" ? e.provider : void 0 };
     }
   } catch {
   }
@@ -222,9 +277,9 @@ function writeIndex(index) {
   } catch {
   }
 }
-function writeCache(trackId, lyrics, source) {
+function writeCache(trackId, lyrics, source, provider) {
   try {
-    import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.write(cachePath(trackId), { at: Date.now(), lyrics, source });
+    import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.write(cachePath(trackId), { at: Date.now(), lyrics, source, provider });
     const index = readIndex().filter((id) => id !== trackId);
     index.push(trackId);
     while (index.length > MAX_CACHED) {
@@ -358,17 +413,18 @@ async function fetchFromSpicy(trackId, isCancelled) {
         detail: packed ? "lyrics arrived in a format this port cannot read yet" : "empty lyrics payload"
       };
     }
-    return { ok: true, lyrics, from: "api", source: "spicy" };
+    return { ok: true, lyrics: applyLyricOffset(lyrics), from: "api", source: "spicy" };
   }
   return { ok: false, reason: "queued" };
 }
 async function fetchLyrics(trackId, isCancelled = () => false, meta) {
   const cached = readCache(trackId);
   if (cached && cached.source === "spicy") return { ok: true, lyrics: cached.lyrics, from: "cache", source: "spicy" };
-  const useBackup = getPrefs().fallbackLrclib && !!meta;
+  const fromCache = () => cached ? { ok: true, lyrics: cached.lyrics, from: "cache", source: cached.source, provider: cached.provider } : null;
   let primary;
   if (Date.now() < spicyPausedUntil) {
-    if (cached) return { ok: true, lyrics: cached.lyrics, from: "cache", source: cached.source };
+    const hit2 = fromCache();
+    if (hit2) return hit2;
     primary = { ok: false, reason: "unauthorized", detail: "Paused after the service refused this client." };
   } else {
     primary = await fetchFromSpicy(trackId, isCancelled);
@@ -381,15 +437,29 @@ async function fetchLyrics(trackId, isCancelled = () => false, meta) {
   if (primary.reason === "unauthorized" || primary.reason === "bad-response" && primary.status === 418) {
     spicyPausedUntil = Date.now() + SPICY_PAUSE_MS;
   }
-  if (cached) return { ok: true, lyrics: cached.lyrics, from: "cache", source: cached.source };
-  if (useBackup && meta) {
+  const hit = fromCache();
+  if (hit) return hit;
+  const prefs = getPrefs();
+  let triedBackup = false;
+  if (prefs.useBeautifulSource) {
+    triedBackup = true;
+    const found = await fetchFromBeautiful(trackId, isCancelled);
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    if (found) {
+      writeCache(trackId, found.lyrics, "beautiful", found.provider);
+      return { ok: true, lyrics: found.lyrics, from: "api", source: "beautiful", provider: found.provider };
+    }
+  }
+  if (prefs.fallbackLrclib && meta) {
+    triedBackup = true;
     const backup = await fetchFromLrclib(meta, isCancelled);
     if (isCancelled()) return { ok: false, reason: "cancelled" };
     if (backup) {
       writeCache(trackId, backup, "lrclib");
       return { ok: true, lyrics: backup, from: "api", source: "lrclib" };
     }
-    if (primary.reason === "not-found") return primary;
+  }
+  if (triedBackup && primary.reason !== "not-found") {
     const note = "No backup lyrics found either.";
     return { ...primary, detail: primary.detail ? `${primary.detail} ${note}` : note };
   }
@@ -397,8 +467,8 @@ async function fetchLyrics(trackId, isCancelled = () => false, meta) {
 }
 
 // src/ui/Page.tsx
-var import_react4 = __toESM(require("react"));
-var import_react5 = require("spotifyplus/react");
+var import_react6 = __toESM(require("react"));
+var import_react7 = require("spotifyplus/react");
 var import_spotifyplus6 = require("spotifyplus");
 
 // src/clock.ts
@@ -415,10 +485,12 @@ var PlaybackClock = class {
     this.syncTimer = null;
     this.syncing = false;
     this.eventsBound = false;
-    /** Current position in seconds. */
+    /** Seconds by which lyrics are shown ahead of the song (display delay compensation). */
+    this.offset = () => (Number(getPrefs().timingOffsetMs) || 0) / 1e3;
+    /** The playback position in seconds, plus the timing offset: what the lyrics should be showing. */
     this.now = () => {
-      if (!this.playing) return this.base;
-      return this.base + (Date.now() - this.at) / 1e3;
+      const raw = this.playing ? this.base + (Date.now() - this.at) / 1e3 : this.base;
+      return raw + this.offset();
     };
     this.isPlaying = () => this.playing;
     this.subscribe = (listener) => {
@@ -434,10 +506,11 @@ var PlaybackClock = class {
       if (this.syncing) return;
       this.syncing = true;
       try {
+        const askedAt = Date.now();
         const progressMs = await Promise.resolve(import_spotifyplus3.SpotifyPlus.Player.getProgress());
         if (typeof progressMs === "number" && Number.isFinite(progressMs)) {
           this.base = progressMs / 1e3;
-          this.at = Date.now();
+          this.at = (askedAt + Date.now()) / 2;
         }
         const state = await Promise.resolve(import_spotifyplus3.SpotifyPlus.Player.getState());
         if (state && typeof state.isPlaying === "boolean") this.playing = state.isPlaying;
@@ -455,7 +528,7 @@ var PlaybackClock = class {
     if (this.eventsBound) return;
     this.eventsBound = true;
     import_spotifyplus3.SpotifyPlus.Events.on("playPause", (payload) => {
-      this.base = this.now();
+      this.base = this.now() - this.offset();
       this.at = Date.now();
       this.playing = !!payload?.isPlaying;
       void this.resync();
@@ -740,6 +813,7 @@ function useLyrics(trackId, attempt, meta) {
       try {
         const display = transformLyrics(result.lyrics);
         if (result.source === "lrclib") display.credit = "Lyrics from LRCLIB (line-synced backup source)";
+        else if (result.source === "beautiful") display.credit = result.provider ? `Lyrics provided by ${result.provider}` : "Lyrics from the SpotifyPlus lyrics service";
         setState({ status: "ready", display, from: result.from });
       } catch (error) {
         import_spotifyplus4.SpotifyPlus.error("Spicy Lyrics: could not read the lyrics data", error);
@@ -782,7 +856,7 @@ var import_jsx_runtime = require("react/jsx-runtime");
 var BASE_FONT = 30;
 function seekTo(seconds) {
   try {
-    import_spotifyplus5.SpotifyPlus.Player.seek(Math.max(0, seconds) * 1e3);
+    import_spotifyplus5.SpotifyPlus.Player.seek(Math.max(0, seconds - clock.offset()) * 1e3);
   } catch (error) {
     import_spotifyplus5.SpotifyPlus.warn("Spicy Lyrics: seek failed", error);
   }
@@ -859,9 +933,101 @@ function InterludeRowBase({ line, activeUntil, prefs }) {
 }
 var InterludeRow = (0, import_react2.memo)(InterludeRowBase);
 
-// src/ui/Page.tsx
+// src/ui/Background.tsx
+var import_react4 = __toESM(require("react"));
+var import_react5 = require("spotifyplus/react");
+var import_animated = __toESM(require("spotifyplus/react/animated"));
 var import_jsx_runtime2 = require("react/jsx-runtime");
-var Boundary = class extends import_react4.default.Component {
+function hash(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function hex2(n) {
+  return Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, "0").toUpperCase();
+}
+function hsla(h, s, l, alpha = 1) {
+  const hue = (h % 360 + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(hue / 60 % 2 - 1));
+  const m = l - c / 2;
+  const [r, g, b] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
+  return `#${hex2(alpha * 255)}${hex2((r + m) * 255)}${hex2((g + m) * 255)}${hex2((b + m) * 255)}`;
+}
+function hueOf(color) {
+  const m = /^#?([0-9a-f]{6})$/i.exec((color ?? "").trim());
+  if (!m) return null;
+  const r = parseInt(m[1].slice(0, 2), 16) / 255;
+  const g = parseInt(m[1].slice(2, 4), 16) / 255;
+  const b = parseInt(m[1].slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max - min < 0.06) return null;
+  const d = max - min;
+  const h = max === r ? (g - b) / d % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+function themeFor(color, id) {
+  const hue = hueOf(color) ?? (id ? hash(id) % 360 : 270);
+  return { base: hsla(hue, 0.4, 0.06), hues: [hue, hue + 40, hue - 40] };
+}
+var LAYERS = [1, 0.78, 0.56, 0.36, 0.2];
+function Blob({ size, hue, left, top, dx, dy, grow, durationMs }) {
+  const t = import_animated.default.useAnimatedValue(0);
+  (0, import_react4.useEffect)(() => {
+    const ease = import_animated.Easing.inOut(import_animated.Easing.quad);
+    const loop = import_animated.default.loop(
+      import_animated.default.sequence([
+        import_animated.default.timing(t, { toValue: 1, duration: durationMs, easing: ease, useNativeDriver: true }),
+        import_animated.default.timing(t, { toValue: 0, duration: durationMs, easing: ease, useNativeDriver: true })
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [t, durationMs]);
+  const color = hsla(hue, 0.75, 0.5, 0.1);
+  const style = {
+    position: "absolute",
+    left: `${left}%`,
+    top: `${top}%`,
+    width: size,
+    height: size,
+    transform: [
+      { translateX: t.interpolate({ inputRange: [0, 1], outputRange: [-dx, dx] }) },
+      { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [dy, -dy] }) },
+      { scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, grow] }) }
+    ]
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style, children: LAYERS.map((k) => {
+    const s = size * k;
+    const offset = (size - s) / 2;
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", left: offset, top: offset, width: s, height: s, borderRadius: s / 2, backgroundColor: color } }, k);
+  }) });
+}
+function Background({ color, trackId }) {
+  const theme = (0, import_react4.useMemo)(() => themeFor(color, trackId), [color, trackId]);
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden", backgroundColor: theme.base }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 560, hue: theme.hues[0], left: -35, top: -8, dx: 90, dy: 70, grow: 1.18, durationMs: 9e3 }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 500, hue: theme.hues[1], left: 30, top: 35, dx: 80, dy: 100, grow: 1.22, durationMs: 12e3 }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 460, hue: theme.hues[2], left: -20, top: 62, dx: 100, dy: 60, grow: 1.15, durationMs: 15e3 })
+  ] });
+}
+var SoftBoundary = class extends import_react4.default.Component {
+  constructor() {
+    super(...arguments);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+};
+
+// src/ui/Page.tsx
+var import_jsx_runtime3 = require("react/jsx-runtime");
+var Boundary = class extends import_react6.default.Component {
   constructor() {
     super(...arguments);
     this.state = { failed: false };
@@ -875,7 +1041,7 @@ var Boundary = class extends import_react4.default.Component {
   render() {
     if (this.state.failed) {
       const Original = this.props.Original;
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Original, {});
+      return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Original, {});
     }
     return this.props.children;
   }
@@ -884,9 +1050,9 @@ function SpicyLyricsPage(props) {
   const prefs = usePrefs();
   if (!prefs.enabled) {
     const Original = props.Original;
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Original, {});
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Original, {});
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Boundary, { Original: props.Original, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(LyricsScreen, { prefs }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Boundary, { Original: props.Original, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LyricsScreen, { prefs }) });
 }
 function goBack() {
   try {
@@ -896,53 +1062,53 @@ function goBack() {
   }
 }
 function Header({ title, artist, image }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
-    image ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
+    image ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
   ] });
 }
 function Notice({ message, onRetry }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 18, fontWeight: "700", textAlign: "center" }, children: message }),
-    onRetry ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-      import_react5.Pressable,
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 18, fontWeight: "700", textAlign: "center" }, children: message }),
+    onRetry ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      import_react7.Pressable,
       {
         onPress: onRetry,
         style: { marginTop: 18, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22, backgroundColor: COLORS.surface },
-        children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 15, fontWeight: "700" }, children: "Try again" })
+        children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: COLORS.active, fontSize: 15, fontWeight: "700" }, children: "Try again" })
       }
     ) : null
   ] });
 }
 function Credits({ writers, credit }) {
-  if (writers.length === 0 && !credit) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { height: 120 } });
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: [
-    writers.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) : null,
-    credit ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14, marginTop: writers.length > 0 ? 6 : 0 }, children: credit }) : null
+  if (writers.length === 0 && !credit) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.View, { style: { height: 120 } });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: [
+    writers.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) : null,
+    credit ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react7.Text, { style: { color: white(0.5), fontSize: 14, marginTop: writers.length > 0 ? 6 : 0 }, children: credit }) : null
   ] });
 }
 function StaticLyrics({ display, prefs }) {
   const align = display.rtl ? "right" : "left";
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.ScrollView, { style: { flex: 1 }, contentContainerStyle: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 60 }, children: [
-    display.staticLines.map((text, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-      import_react5.Text,
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.ScrollView, { style: { flex: 1 }, contentContainerStyle: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 60 }, children: [
+    display.staticLines.map((text, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      import_react7.Text,
       {
         style: { color: COLORS.active, fontSize: 24 * prefs.fontScale, fontWeight: "700", textAlign: align, marginBottom: text ? 10 : 22 },
         children: text
       },
       index
     )),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers, credit: display.credit })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Credits, { writers: display.writers, credit: display.credit })
   ] });
 }
 function SyncedLyrics({ display, prefs }) {
-  const listRef = (0, import_react4.useRef)(null);
+  const listRef = (0, import_react6.useRef)(null);
   const lines = display.lines;
-  (0, import_react4.useEffect)(() => {
+  (0, import_react6.useEffect)(() => {
     let last = -2;
     const check = () => {
       const index = findActiveIndex(lines, clock.now());
@@ -959,16 +1125,16 @@ function SyncedLyrics({ display, prefs }) {
     check();
     return clock.subscribe(check);
   }, [lines]);
-  const renderItem = (0, import_react4.useCallback)(
+  const renderItem = (0, import_react6.useCallback)(
     ({ item, index }) => {
       const next = lines[index + 1];
       const activeUntil = Math.max(item.end, next ? next.start : item.end + 8);
-      return item.kind === "interlude" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(InterludeRow, { line: item, activeUntil, prefs }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(VocalRow, { line: item, activeUntil, prefs });
+      return item.kind === "interlude" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(InterludeRow, { line: item, activeUntil, prefs }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(VocalRow, { line: item, activeUntil, prefs });
     },
     [lines, prefs]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-    import_react5.FlatList,
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    import_react7.FlatList,
     {
       ref: listRef,
       style: { flex: 1 },
@@ -979,19 +1145,19 @@ function SyncedLyrics({ display, prefs }) {
       windowSize: 4,
       estimatedItemSize: 96,
       contentContainerStyle: { paddingHorizontal: 16, paddingTop: 30 },
-      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers, credit: display.credit })
+      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Credits, { writers: display.writers, credit: display.credit })
     }
   );
 }
 function LyricsScreen({ prefs }) {
   const track = useCurrentTrack();
-  const [attempt, setAttempt] = (0, import_react4.useState)(0);
+  const [attempt, setAttempt] = (0, import_react6.useState)(0);
   const state = useLyrics(trackIdOf(track), attempt, metaOf(track));
   let body;
   if (state.status === "loading") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Notice, { message: "Loading lyrics..." });
+    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Notice, { message: "Loading lyrics..." });
   } else if (state.status === "error") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       Notice,
       {
         message: describeFailure(state.reason, state.httpStatus, state.detail),
@@ -1002,12 +1168,13 @@ function LyricsScreen({ prefs }) {
       }
     );
   } else if (state.display.type === "Static") {
-    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(StaticLyrics, { display: state.display, prefs });
+    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(StaticLyrics, { display: state.display, prefs });
   } else {
-    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(SyncedLyrics, { display: state.display, prefs }, trackIdOf(track) ?? "none");
+    body = /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SyncedLyrics, { display: state.display, prefs }, trackIdOf(track) ?? "none");
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, backgroundColor: COLORS.background }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Header, { title: track?.title ?? "Spicy Lyrics", artist: track?.artist ?? "", image: track?.album?.image }),
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_react7.View, { style: { flex: 1, backgroundColor: COLORS.background }, children: [
+    prefs.animatedBackground ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SoftBoundary, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Background, { color: track?.color, trackId: trackIdOf(track) }) }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Header, { title: track?.title ?? "Spicy Lyrics", artist: track?.artist ?? "", image: track?.album?.image }),
     body
   ] });
 }
@@ -1062,6 +1229,30 @@ function registerSettings() {
           min: 0.7,
           max: 1.5,
           step: 0.05
+        },
+        {
+          id: "timingOffsetMs",
+          type: "slider",
+          label: "Lyrics timing (ms ahead)",
+          description: "Raise this if the lyrics are behind the song, lower it if they are ahead.",
+          value: prefs.timingOffsetMs,
+          min: -1e3,
+          max: 2e3,
+          step: 50
+        },
+        {
+          id: "animatedBackground",
+          type: "toggle",
+          label: "Animated background",
+          description: "Slowly moving coloured glow behind the lyrics.",
+          value: prefs.animatedBackground
+        },
+        {
+          id: "useBeautifulSource",
+          type: "toggle",
+          label: "Beautiful Lyrics source",
+          description: "Also ask the lyrics service that Beautiful Lyrics uses (word-synced for many songs).",
+          value: prefs.useBeautifulSource
         },
         {
           id: "fallbackLrclib",
