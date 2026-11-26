@@ -916,7 +916,7 @@ function VocalRowBase({ line, activeUntil, prefs }) {
           textShadowColor: white(0.6 * glow),
           textShadowOffset: { width: 0, height: 0 },
           textShadowRadius: 14 * glow,
-          transform: [{ translateY: -fontSize * 0.07 * fill }]
+          transform: [{ translateY: -fontSize * 0.13 * (0.35 * fill + 0.65 * glow) }, { scale: 1 + 0.07 * glow }]
         },
         children: syllable.text + (last && word.space ? " " : "")
       },
