@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.1, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.2, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -18,8 +18,8 @@ under the extension's settings ("Use Spicy Lyrics").
 
 ## Settings
 
-Use Spicy Lyrics, word-by-word highlight, background vocals, romanization, translation, text size, API client
-version (advanced), clear lyrics cache.
+Use Spicy Lyrics, word-by-word highlight, background vocals, romanization, translation, text size, backup lyrics
+(LRCLIB), API client version (advanced), clear lyrics cache.
 
 ## What this version does not have
 
@@ -33,7 +33,9 @@ The word highlight is a stepwise fade (about 10 updates a second) instead of a s
 
 - Lyrics are requested from `api.spicylyrics.org`, and your Spotify access token is sent with the request, the same way the
   desktop Spicy Lyrics does. Nothing else is sent. Lyrics are cached on the phone for 6 days.
-- If the service refuses the request, the page shows the HTTP status. Please include it when reporting a problem.
+- If the Spicy Lyrics service refuses the request (for example HTTP 418), the page shows the status and what the service
+  said, then uses LRCLIB (https://lrclib.net, an open lyrics database) as a backup. Backup lyrics are line-synced only,
+  with no word-by-word highlight, and the end of the page says where they came from. Turn this off with "Backup lyrics".
 - No Spicy Lyrics source code is included; this is a fresh implementation that speaks the same API.
 
 Credit: Spicy Lyrics by Spikerko (https://github.com/Spikerko/spicy-lyrics).

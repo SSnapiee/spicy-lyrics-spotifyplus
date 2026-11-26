@@ -35,6 +35,7 @@ var DEFAULT_PREFS = {
   showBackgroundVocals: true,
   animateSyllables: true,
   fontScale: 1,
+  fallbackLrclib: true,
   apiVersion: "5.22.3"
 };
 var KEYS = Object.keys(DEFAULT_PREFS);
@@ -75,10 +76,118 @@ function isPrefKey(id) {
 
 // src/api.ts
 var import_spotifyplus2 = require("spotifyplus");
+
+// src/util.ts
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Request timed out after ${ms} ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// src/lrclib.ts
+var BASE = "https://lrclib.net/api";
+var TIMEOUT_MS = 12e3;
+var USER_AGENT = "SpicyLyrics-SpotifyPlus-port/0.2.0";
+var LAST_LINE_SECONDS = 6;
+var STAMP = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+function parseLrc(lrc, durationSec) {
+  const entries = [];
+  for (const raw of lrc.split(/\r?\n/)) {
+    const stamps = [];
+    STAMP.lastIndex = 0;
+    let match;
+    while ((match = STAMP.exec(raw)) !== null) {
+      const fraction = match[3] ? Number("0." + match[3]) : 0;
+      stamps.push(Number(match[1]) * 60 + Number(match[2]) + fraction);
+    }
+    if (stamps.length === 0) continue;
+    const text = raw.replace(STAMP, "").trim();
+    for (const time of stamps) entries.push({ time, text });
+  }
+  entries.sort((a, b) => a.time - b.time);
+  const content = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    if (!entry.text) continue;
+    const next = entries[i + 1];
+    let end = next ? next.time : entry.time + LAST_LINE_SECONDS;
+    if (!next && durationSec && durationSec > entry.time) end = Math.min(end, durationSec);
+    if (end <= entry.time) end = entry.time + 1;
+    content.push({ Type: "Vocal", StartTime: entry.time, EndTime: end, Text: entry.text });
+  }
+  if (content.length < 2) return null;
+  return { Type: "Line", StartTime: content[0].StartTime, EndTime: content[content.length - 1].EndTime, Content: content };
+}
+function plainToStatic(plain) {
+  const lines = plain.split(/\r?\n/).map((line) => line.trim());
+  while (lines.length && !lines[0]) lines.shift();
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  if (lines.length === 0) return null;
+  return { Type: "Static", Lines: lines.map((Text3) => ({ Text: Text3 })) };
+}
+function recordToLyrics(record, durationSec) {
+  if (record.instrumental) return { Type: "Static", Lines: [{ Text: "\u266A Instrumental \u266A" }] };
+  if (record.syncedLyrics) {
+    const synced = parseLrc(record.syncedLyrics, durationSec ?? record.duration);
+    if (synced) return synced;
+  }
+  if (record.plainLyrics) return plainToStatic(record.plainLyrics);
+  return null;
+}
+async function getJson(url) {
+  const response = await withTimeout(fetch(url, { headers: { Accept: "application/json", "User-Agent": USER_AGENT } }), TIMEOUT_MS);
+  let json = null;
+  try {
+    json = await response.json();
+  } catch {
+  }
+  return { status: response.status, json };
+}
+var enc = encodeURIComponent;
+async function fetchFromLrclib(meta, isCancelled = () => false) {
+  const title = meta.title?.trim();
+  const artist = meta.artist?.trim();
+  if (!title || !artist) return null;
+  const duration = meta.durationSec && meta.durationSec > 0 ? Math.round(meta.durationSec) : void 0;
+  try {
+    let url = `${BASE}/get?track_name=${enc(title)}&artist_name=${enc(artist)}`;
+    if (meta.album) url += `&album_name=${enc(meta.album)}`;
+    if (duration) url += `&duration=${duration}`;
+    const exact = await getJson(url);
+    if (isCancelled()) return null;
+    if (exact.status === 200 && exact.json && typeof exact.json === "object") {
+      const lyrics = recordToLyrics(exact.json, duration);
+      if (lyrics) return lyrics;
+    }
+    const search = await getJson(`${BASE}/search?track_name=${enc(title)}&artist_name=${enc(artist)}`);
+    if (isCancelled()) return null;
+    if (search.status !== 200 || !Array.isArray(search.json)) return null;
+    const records = search.json.filter((item) => item && (item.syncedLyrics || item.plainLyrics || item.instrumental));
+    const close = (item) => !duration || typeof item.duration !== "number" || Math.abs(item.duration - duration) <= 3;
+    const pick = records.find((item) => item.syncedLyrics && close(item)) ?? records.find((item) => item.syncedLyrics) ?? records.find(close) ?? records[0];
+    return pick ? recordToLyrics(pick, duration) : null;
+  } catch {
+    return null;
+  }
+}
+
+// src/api.ts
 var API_URL = "https://api.spicylyrics.org/query";
 var CACHE_TTL_MS = 6 * 24 * 60 * 60 * 1e3;
 var REQUEST_TIMEOUT_MS = 15e3;
 var QUEUE_RETRY_DELAYS_MS = [2e3, 3e3, 4e3, 5e3, 6e3, 8e3];
+var BACKUP_TTL_MS = 24 * 60 * 60 * 1e3;
 var cachePath = (trackId) => `lyrics/${trackId}.json`;
 function isLyrics(value) {
   const type = value?.Type;
@@ -89,7 +198,9 @@ function readCache(trackId) {
     const entry = import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.read(cachePath(trackId));
     if (entry && typeof entry === "object" && !(entry instanceof Uint8Array)) {
       const e = entry;
-      if (typeof e.at === "number" && Date.now() - e.at < CACHE_TTL_MS && isLyrics(e.lyrics)) return e.lyrics;
+      const source = e.source === "lrclib" ? "lrclib" : "spicy";
+      const ttl = source === "lrclib" ? BACKUP_TTL_MS : CACHE_TTL_MS;
+      if (typeof e.at === "number" && Date.now() - e.at < ttl && isLyrics(e.lyrics)) return { lyrics: e.lyrics, source };
     }
   } catch {
   }
@@ -111,9 +222,9 @@ function writeIndex(index) {
   } catch {
   }
 }
-function writeCache(trackId, lyrics) {
+function writeCache(trackId, lyrics, source) {
   try {
-    import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.write(cachePath(trackId), { at: Date.now(), lyrics });
+    import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.write(cachePath(trackId), { at: Date.now(), lyrics, source });
     const index = readIndex().filter((id) => id !== trackId);
     index.push(trackId);
     while (index.length > MAX_CACHED) {
@@ -137,21 +248,6 @@ function clearLyricsCache() {
   writeIndex([]);
   import_spotifyplus2.SpotifyPlus.log(`Spicy Lyrics: cleared ${removed} cached lyrics`);
   return removed;
-}
-function withTimeout(promise, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Request timed out after ${ms} ms`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
 }
 function pickResult(json) {
   const list = Array.isArray(json?.queries) ? json.queries : [];
@@ -193,14 +289,19 @@ async function postQuery(trackId, token) {
     }),
     REQUEST_TIMEOUT_MS
   );
-  let json = null;
+  let text = "";
   try {
-    json = await response.json();
+    text = await response.text();
   } catch {
   }
-  return { status: response.status, json };
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+  }
+  const snippet = text.replace(/\s+/g, " ").trim().slice(0, 140);
+  return { status: response.status, json, snippet };
 }
-var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function getToken() {
   try {
     return String(import_spotifyplus2.SpotifyPlus.Platform.Session.accessToken ?? "");
@@ -208,9 +309,12 @@ function getToken() {
     return "";
   }
 }
-async function fetchLyrics(trackId, isCancelled = () => false) {
-  const cached = readCache(trackId);
-  if (cached) return { ok: true, lyrics: cached, from: "cache" };
+var SPICY_PAUSE_MS = 10 * 60 * 1e3;
+var spicyPausedUntil = 0;
+function resumeSpicy() {
+  spicyPausedUntil = 0;
+}
+async function fetchFromSpicy(trackId, isCancelled) {
   let token = getToken();
   if (!token) return { ok: false, reason: "no-token" };
   let usedRefreshedToken = false;
@@ -224,9 +328,6 @@ async function fetchLyrics(trackId, isCancelled = () => false) {
     }
     if (isCancelled()) return { ok: false, reason: "cancelled" };
     if (reply.status === 429) return { ok: false, reason: "rate-limited", status: 429 };
-    if (reply.status >= 400 && reply.json === null) {
-      return { ok: false, reason: "bad-response", status: reply.status };
-    }
     const result = pickResult(reply.json);
     const status = result?.httpStatus || reply.status;
     if (status === 401 || status === 403) {
@@ -236,7 +337,7 @@ async function fetchLyrics(trackId, isCancelled = () => false) {
         token = fresh;
         continue;
       }
-      return { ok: false, reason: "unauthorized", status };
+      return { ok: false, reason: "unauthorized", status, detail: reply.snippet || void 0 };
     }
     if (status === 503) {
       if (attempt === QUEUE_RETRY_DELAYS_MS.length) return { ok: false, reason: "queued", status };
@@ -244,9 +345,8 @@ async function fetchLyrics(trackId, isCancelled = () => false) {
       continue;
     }
     if (status === 404) return { ok: false, reason: "not-found", status };
-    if (status === 429) return { ok: false, reason: "rate-limited", status };
     if (!result || status !== 200) {
-      return { ok: false, reason: "bad-response", status, detail: result ? void 0 : "no result in response" };
+      return { ok: false, reason: "bad-response", status, detail: reply.snippet || (result ? void 0 : "no result in response") };
     }
     const lyrics = parsePayload(result);
     if (!lyrics) {
@@ -258,10 +358,42 @@ async function fetchLyrics(trackId, isCancelled = () => false) {
         detail: packed ? "lyrics arrived in a format this port cannot read yet" : "empty lyrics payload"
       };
     }
-    writeCache(trackId, lyrics);
-    return { ok: true, lyrics, from: "api" };
+    return { ok: true, lyrics, from: "api", source: "spicy" };
   }
   return { ok: false, reason: "queued" };
+}
+async function fetchLyrics(trackId, isCancelled = () => false, meta) {
+  const cached = readCache(trackId);
+  if (cached && cached.source === "spicy") return { ok: true, lyrics: cached.lyrics, from: "cache", source: "spicy" };
+  const useBackup = getPrefs().fallbackLrclib && !!meta;
+  let primary;
+  if (Date.now() < spicyPausedUntil) {
+    if (cached) return { ok: true, lyrics: cached.lyrics, from: "cache", source: cached.source };
+    primary = { ok: false, reason: "unauthorized", detail: "Paused after the service refused this client." };
+  } else {
+    primary = await fetchFromSpicy(trackId, isCancelled);
+  }
+  if (primary.ok) {
+    writeCache(trackId, primary.lyrics, "spicy");
+    return primary;
+  }
+  if (primary.reason === "cancelled") return primary;
+  if (primary.reason === "unauthorized" || primary.reason === "bad-response" && primary.status === 418) {
+    spicyPausedUntil = Date.now() + SPICY_PAUSE_MS;
+  }
+  if (cached) return { ok: true, lyrics: cached.lyrics, from: "cache", source: cached.source };
+  if (useBackup && meta) {
+    const backup = await fetchFromLrclib(meta, isCancelled);
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    if (backup) {
+      writeCache(trackId, backup, "lrclib");
+      return { ok: true, lyrics: backup, from: "api", source: "lrclib" };
+    }
+    if (primary.reason === "not-found") return primary;
+    const note = "No backup lyrics found either.";
+    return { ...primary, detail: primary.detail ? `${primary.detail} ${note}` : note };
+  }
+  return primary;
 }
 
 // src/ui/Page.tsx
@@ -572,14 +704,25 @@ function useCurrentTrack() {
   }, []);
   return track;
 }
+function metaOf(track) {
+  if (!track || !track.title || !track.artist) return void 0;
+  return {
+    title: track.title,
+    artist: track.artist,
+    album: track.album?.name,
+    durationSec: typeof track.durationMs === "number" ? track.durationMs / 1e3 : void 0
+  };
+}
 function trackIdOf(track) {
   if (!track) return null;
   if (track.id) return track.id;
   const parts = track.uri?.split(":") ?? [];
   return parts.length === 3 && parts[1] === "track" ? parts[2] : null;
 }
-function useLyrics(trackId, attempt) {
+function useLyrics(trackId, attempt, meta) {
   const [state, setState] = (0, import_react.useState)({ status: "loading" });
+  const metaRef = (0, import_react.useRef)(meta);
+  metaRef.current = meta;
   (0, import_react.useEffect)(() => {
     if (!trackId) {
       setState({ status: "error", reason: "not-found", detail: "This item has no lyrics." });
@@ -587,7 +730,7 @@ function useLyrics(trackId, attempt) {
     }
     let cancelled = false;
     setState({ status: "loading" });
-    void fetchLyrics(trackId, () => cancelled).then((result) => {
+    void fetchLyrics(trackId, () => cancelled, metaRef.current).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         if (result.reason === "cancelled") return;
@@ -595,7 +738,9 @@ function useLyrics(trackId, attempt) {
         return;
       }
       try {
-        setState({ status: "ready", display: transformLyrics(result.lyrics), from: result.from });
+        const display = transformLyrics(result.lyrics);
+        if (result.source === "lrclib") display.credit = "Lyrics from LRCLIB (line-synced backup source)";
+        setState({ status: "ready", display, from: result.from });
       } catch (error) {
         import_spotifyplus4.SpotifyPlus.error("Spicy Lyrics: could not read the lyrics data", error);
         setState({ status: "error", reason: "bad-response", detail: error?.message });
@@ -613,7 +758,7 @@ function describeFailure(reason, httpStatus, detail) {
     case "no-token":
       return "Couldn't read your Spotify session. Try again in a moment.";
     case "unauthorized":
-      return `The lyrics service refused this request${code}.`;
+      return `The lyrics service refused this request${code}.${detail ? ` ${detail}` : ""}`;
     case "not-found":
       return detail ?? "No lyrics found for this song.";
     case "rate-limited":
@@ -773,9 +918,12 @@ function Notice({ message, onRetry }) {
     ) : null
   ] });
 }
-function Credits({ writers }) {
-  if (writers.length === 0) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { height: 120 } });
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) });
+function Credits({ writers, credit }) {
+  if (writers.length === 0 && !credit) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { height: 120 } });
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: [
+    writers.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) : null,
+    credit ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14, marginTop: writers.length > 0 ? 6 : 0 }, children: credit }) : null
+  ] });
 }
 function StaticLyrics({ display, prefs }) {
   const align = display.rtl ? "right" : "left";
@@ -788,7 +936,7 @@ function StaticLyrics({ display, prefs }) {
       },
       index
     )),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers })
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers, credit: display.credit })
   ] });
 }
 function SyncedLyrics({ display, prefs }) {
@@ -831,14 +979,14 @@ function SyncedLyrics({ display, prefs }) {
       windowSize: 4,
       estimatedItemSize: 96,
       contentContainerStyle: { paddingHorizontal: 16, paddingTop: 30 },
-      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers })
+      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers, credit: display.credit })
     }
   );
 }
 function LyricsScreen({ prefs }) {
   const track = useCurrentTrack();
   const [attempt, setAttempt] = (0, import_react4.useState)(0);
-  const state = useLyrics(trackIdOf(track), attempt);
+  const state = useLyrics(trackIdOf(track), attempt, metaOf(track));
   let body;
   if (state.status === "loading") {
     body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Notice, { message: "Loading lyrics..." });
@@ -847,7 +995,10 @@ function LyricsScreen({ prefs }) {
       Notice,
       {
         message: describeFailure(state.reason, state.httpStatus, state.detail),
-        onRetry: state.reason === "not-found" ? void 0 : () => setAttempt((n) => n + 1)
+        onRetry: state.reason === "not-found" ? void 0 : () => {
+          resumeSpicy();
+          setAttempt((n) => n + 1);
+        }
       }
     );
   } else if (state.display.type === "Static") {
@@ -911,6 +1062,13 @@ function registerSettings() {
           min: 0.7,
           max: 1.5,
           step: 0.05
+        },
+        {
+          id: "fallbackLrclib",
+          type: "toggle",
+          label: "Backup lyrics (LRCLIB)",
+          description: "Use the open LRCLIB database for songs the Spicy Lyrics service can't provide. Line-synced only.",
+          value: prefs.fallbackLrclib
         },
         {
           id: "apiVersion",
