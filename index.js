@@ -1020,17 +1020,36 @@ function Blob({ size, hue, left, top, dx, dy, grow, durationMs }) {
     return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", left: offset, top: offset, width: s, height: s, borderRadius: s / 2, backgroundColor: color } }, k);
   }) });
 }
-function ArtLayer({ image, blurRadius, opacity, size, scale, turnSeconds, reverse }) {
+function ArtLayer({ image, blurRadius, opacity, size, scale, turnSeconds, reverse, startDeg = 0, driftX = 0, driftY = 0, driftSeconds = 40 }) {
   const t = import_animated.default.useAnimatedValue(0);
+  const d = import_animated.default.useAnimatedValue(0);
   (0, import_react4.useEffect)(() => {
     const loop = import_animated.default.loop(import_animated.default.timing(t, { toValue: 1, duration: turnSeconds * 1e3, easing: import_animated.Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [t, turnSeconds]);
+  (0, import_react4.useEffect)(() => {
+    const ease = import_animated.Easing.inOut(import_animated.Easing.sin);
+    const loop = import_animated.default.loop(
+      import_animated.default.sequence([
+        import_animated.default.timing(d, { toValue: 1, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true }),
+        import_animated.default.timing(d, { toValue: 0, duration: driftSeconds * 1e3 / 2, easing: ease, useNativeDriver: true })
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [d, driftSeconds]);
+  const from = reverse ? startDeg + 360 : startDeg;
+  const to = reverse ? startDeg : startDeg + 360;
   const style = {
     width: size,
     height: size,
-    transform: [{ rotate: t.interpolate({ inputRange: [0, 1], outputRange: reverse ? ["360deg", "0deg"] : ["0deg", "360deg"] }) }, { scale }]
+    transform: [
+      { translateX: d.interpolate({ inputRange: [0, 1], outputRange: [-driftX, driftX] }) },
+      { translateY: d.interpolate({ inputRange: [0, 1], outputRange: [driftY, -driftY] }) },
+      { rotate: t.interpolate({ inputRange: [0, 1], outputRange: [`${from}deg`, `${to}deg`] }) },
+      { scale }
+    ]
   };
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
     import_react5.ScriptView,
@@ -1040,16 +1059,39 @@ function ArtLayer({ image, blurRadius, opacity, size, scale, turnSeconds, revers
     }
   ) }) });
 }
+var FADE_MS = 1400;
+function FadeIn({ children }) {
+  const a = import_animated.default.useAnimatedValue(0);
+  (0, import_react4.useEffect)(() => {
+    import_animated.default.timing(a, { toValue: 1, duration: FADE_MS, easing: import_animated.Easing.inOut(import_animated.Easing.quad), useNativeDriver: true }).start();
+  }, [a]);
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_animated.default.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: a }, children });
+}
+function Artwork({ image }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(FadeIn, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 1, size: 1100, scale: 1.12, turnSeconds: 63, reverse: false, driftX: 150, driftY: 190, driftSeconds: 48 }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 70, opacity: 0.38, size: 1e3, scale: 1.12, turnSeconds: 84, reverse: true, startDeg: 115, driftX: 130, driftY: 170, driftSeconds: 57 })
+  ] });
+}
 function Background({ color, trackId, image }) {
   const theme = (0, import_react4.useMemo)(() => themeFor(color, trackId), [color, trackId]);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden", backgroundColor: theme.base }, children: [
+  const [shown, setShown] = (0, import_react4.useState)(image ? [image] : []);
+  (0, import_react4.useEffect)(() => {
+    if (!image) return;
+    setShown((prev) => prev[prev.length - 1] === image ? prev : [...prev.slice(-1), image]);
+    const timer = setTimeout(() => setShown((prev) => prev.slice(-1)), FADE_MS + 200);
+    return () => clearTimeout(timer);
+  }, [image]);
+  const fill = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { pointerEvents: "none", style: { ...fill, overflow: "hidden", backgroundColor: theme.base }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 560, hue: theme.hues[0], left: -35, top: -8, dx: 90, dy: 70, grow: 1.18, durationMs: 9e3 }),
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 500, hue: theme.hues[1], left: 30, top: 35, dx: 80, dy: 100, grow: 1.22, durationMs: 12e3 }),
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Blob, { size: 460, hue: theme.hues[2], left: -20, top: 62, dx: 100, dy: 60, grow: 1.15, durationMs: 15e3 }),
-    image ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 64, opacity: 0.85, size: 1100, scale: 1.1, turnSeconds: 140, reverse: false }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ArtLayer, { image, blurRadius: 80, opacity: 0.6, size: 900, scale: 1.35, turnSeconds: 95, reverse: true }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#70000000" } })
+    shown.map((src) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Artwork, { image: src }, src)),
+    shown.length ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, bottom: "66%", backgroundColor: "#55000000" } }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, top: "34%", bottom: "34%", backgroundColor: "#77000000" } }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { pointerEvents: "none", style: { ...fill, top: "66%", backgroundColor: "#BB000000" } })
     ] }) : null
   ] });
 }
