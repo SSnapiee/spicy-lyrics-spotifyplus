@@ -1,4 +1,4 @@
-# Spicy Lyrics for Spotify Plus (v0.4, unofficial port)
+# Spicy Lyrics for Spotify Plus (v0.5, unofficial port)
 
 Replaces Spotify's fullscreen lyrics page with synced lyrics from the Spicy Lyrics service:
 line-by-line and word-by-word lyrics, background vocals, duet alignment, interludes, tap a line to seek,
@@ -28,9 +28,14 @@ This is a rewrite for Spotify Plus's native UI, not a copy of the desktop extens
 not here yet: dynamic/animated backgrounds, animated artwork and canvas, the now-playing-bar and sidebar lyrics,
 fullscreen/compact modes, queue view, pop-up lyrics, local lyrics upload and editor, custom themes and fonts, and
 romanization/translation computed on the device (it only shows what the service sends).
-The animated background is the album art, blurred and turning slowly under a dark veil (with a soft coloured glow
+The animated background (v0.5) follows the recipe of Beautiful Lyrics' background: the album art, blurred, in two layers that turn and drift in opposite directions, cross-fading over 1.4 s when the song changes, under a top-to-bottom dark shade (with a soft coloured glow
 under it when a song has no artwork). It is similar in spirit to the desktop's dynamic background, but not the same
 effect: the desktop one is a shader. The word highlight is a stepwise fade (about 10 updates a second) instead of a smooth wipe.
+
+## Changelog
+
+- 0.5.0: background reworked to match Beautiful Lyrics (two drifting layers, 1.4 s cross-fade, gradient shade).
+- 0.4.0: bolder text, more spacing, fade-in, blurred artwork background.
 
 ## Notes
 
