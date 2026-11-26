@@ -1,0 +1,945 @@
+globalThis.__spotifyplus_worklet_bundle__ = 2;
+"use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// src/index.tsx
+var import_spotifyplus7 = require("spotifyplus");
+
+// src/prefs.ts
+var import_spotifyplus = require("spotifyplus");
+var DEFAULT_PREFS = {
+  enabled: true,
+  showRomanization: true,
+  showTranslation: false,
+  showBackgroundVocals: true,
+  animateSyllables: true,
+  fontScale: 1,
+  apiVersion: "5.22.3"
+};
+var KEYS = Object.keys(DEFAULT_PREFS);
+function load() {
+  const out = { ...DEFAULT_PREFS };
+  for (const key of KEYS) {
+    try {
+      const value = import_spotifyplus.SpotifyPlus.Platform.Storage.get(key);
+      if (value !== null && value !== void 0 && typeof value === typeof DEFAULT_PREFS[key]) {
+        out[key] = value;
+      }
+    } catch {
+    }
+  }
+  return out;
+}
+var current = load();
+var listeners = /* @__PURE__ */ new Set();
+var getPrefs = () => current;
+function subscribePrefs(listener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function setPref(key, value) {
+  if (current[key] === value) return;
+  current = { ...current, [key]: value };
+  try {
+    import_spotifyplus.SpotifyPlus.Platform.Storage.set(key, value);
+  } catch {
+  }
+  for (const listener of [...listeners]) listener();
+}
+function isPrefKey(id) {
+  return KEYS.includes(id);
+}
+
+// src/api.ts
+var import_spotifyplus2 = require("spotifyplus");
+var API_URL = "https://api.spicylyrics.org/query";
+var CACHE_TTL_MS = 6 * 24 * 60 * 60 * 1e3;
+var REQUEST_TIMEOUT_MS = 15e3;
+var QUEUE_RETRY_DELAYS_MS = [2e3, 3e3, 4e3, 5e3, 6e3, 8e3];
+var cachePath = (trackId) => `lyrics/${trackId}.json`;
+function isLyrics(value) {
+  const type = value?.Type;
+  return !!value && typeof value === "object" && (type === "Syllable" || type === "Line" || type === "Static");
+}
+function readCache(trackId) {
+  try {
+    const entry = import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.read(cachePath(trackId));
+    if (entry && typeof entry === "object" && !(entry instanceof Uint8Array)) {
+      const e = entry;
+      if (typeof e.at === "number" && Date.now() - e.at < CACHE_TTL_MS && isLyrics(e.lyrics)) return e.lyrics;
+    }
+  } catch {
+  }
+  return null;
+}
+var INDEX_KEY = "cacheIndex";
+var MAX_CACHED = 400;
+function readIndex() {
+  try {
+    const value = import_spotifyplus2.SpotifyPlus.Platform.Storage.get(INDEX_KEY);
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function writeIndex(index) {
+  try {
+    import_spotifyplus2.SpotifyPlus.Platform.Storage.set(INDEX_KEY, index);
+  } catch {
+  }
+}
+function writeCache(trackId, lyrics) {
+  try {
+    import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.write(cachePath(trackId), { at: Date.now(), lyrics });
+    const index = readIndex().filter((id) => id !== trackId);
+    index.push(trackId);
+    while (index.length > MAX_CACHED) {
+      const oldest = index.shift();
+      if (oldest) import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.delete(cachePath(oldest));
+    }
+    writeIndex(index);
+  } catch {
+  }
+}
+function clearLyricsCache() {
+  const index = readIndex();
+  let removed = 0;
+  for (const id of index) {
+    try {
+      import_spotifyplus2.SpotifyPlus.Platform.Storage.Cache.delete(cachePath(id));
+      removed += 1;
+    } catch {
+    }
+  }
+  writeIndex([]);
+  import_spotifyplus2.SpotifyPlus.log(`Spicy Lyrics: cleared ${removed} cached lyrics`);
+  return removed;
+}
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Request timed out after ${ms} ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+function pickResult(json) {
+  const list = Array.isArray(json?.queries) ? json.queries : [];
+  const results = list.map((entry) => ({ entry, result: entry?.result })).filter((item) => item.result && typeof item.result === "object");
+  const byId = results.find((item) => String(item.entry?.operationId) === "0");
+  const byName = results.find((item) => item.entry?.operation === "lyrics");
+  const byPayload = results.find((item) => isLyrics(item.result?.data));
+  const chosen = byId ?? byName ?? byPayload ?? results[0];
+  if (!chosen) return null;
+  const r = chosen.result;
+  return { httpStatus: Number(r.httpStatus ?? 0), data: r.data, format: r.format };
+}
+function parsePayload(result) {
+  let data = result.data;
+  if (typeof data === "string" && (result.format === "json" || data.trim().startsWith("{"))) {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  return isLyrics(data) ? data : null;
+}
+async function postQuery(trackId, token) {
+  const version = getPrefs().apiVersion;
+  const response = await withTimeout(
+    fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "SpicyLyrics-WebAuth": `Bearer ${token}`,
+        "SpicyLyrics-Version": version
+      },
+      body: JSON.stringify({
+        queries: [{ operation: "lyrics", variables: { id: trackId, auth: "SpicyLyrics-WebAuth" } }],
+        client: { version }
+      })
+    }),
+    REQUEST_TIMEOUT_MS
+  );
+  let json = null;
+  try {
+    json = await response.json();
+  } catch {
+  }
+  return { status: response.status, json };
+}
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function getToken() {
+  try {
+    return String(import_spotifyplus2.SpotifyPlus.Platform.Session.accessToken ?? "");
+  } catch {
+    return "";
+  }
+}
+async function fetchLyrics(trackId, isCancelled = () => false) {
+  const cached = readCache(trackId);
+  if (cached) return { ok: true, lyrics: cached, from: "cache" };
+  let token = getToken();
+  if (!token) return { ok: false, reason: "no-token" };
+  let usedRefreshedToken = false;
+  for (let attempt = 0; attempt <= QUEUE_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    let reply;
+    try {
+      reply = await postQuery(trackId, token);
+    } catch (error) {
+      return { ok: false, reason: "network", detail: error?.message };
+    }
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    if (reply.status === 429) return { ok: false, reason: "rate-limited", status: 429 };
+    if (reply.status >= 400 && reply.json === null) {
+      return { ok: false, reason: "bad-response", status: reply.status };
+    }
+    const result = pickResult(reply.json);
+    const status = result?.httpStatus || reply.status;
+    if (status === 401 || status === 403) {
+      const fresh = getToken();
+      if (!usedRefreshedToken && fresh && fresh !== token) {
+        usedRefreshedToken = true;
+        token = fresh;
+        continue;
+      }
+      return { ok: false, reason: "unauthorized", status };
+    }
+    if (status === 503) {
+      if (attempt === QUEUE_RETRY_DELAYS_MS.length) return { ok: false, reason: "queued", status };
+      await sleep(QUEUE_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    if (status === 404) return { ok: false, reason: "not-found", status };
+    if (status === 429) return { ok: false, reason: "rate-limited", status };
+    if (!result || status !== 200) {
+      return { ok: false, reason: "bad-response", status, detail: result ? void 0 : "no result in response" };
+    }
+    const lyrics = parsePayload(result);
+    if (!lyrics) {
+      const packed = typeof result.data === "string";
+      return {
+        ok: false,
+        reason: packed ? "unsupported-format" : "not-found",
+        status,
+        detail: packed ? "lyrics arrived in a format this port cannot read yet" : "empty lyrics payload"
+      };
+    }
+    writeCache(trackId, lyrics);
+    return { ok: true, lyrics, from: "api" };
+  }
+  return { ok: false, reason: "queued" };
+}
+
+// src/ui/Page.tsx
+var import_react4 = __toESM(require("react"));
+var import_react5 = require("spotifyplus/react");
+var import_spotifyplus6 = require("spotifyplus");
+
+// src/clock.ts
+var import_spotifyplus3 = require("spotifyplus");
+var TICK_MS = 80;
+var SYNC_MS = 500;
+var PlaybackClock = class {
+  constructor() {
+    this.base = 0;
+    this.at = Date.now();
+    this.playing = false;
+    this.listeners = /* @__PURE__ */ new Set();
+    this.tickTimer = null;
+    this.syncTimer = null;
+    this.syncing = false;
+    this.eventsBound = false;
+    /** Current position in seconds. */
+    this.now = () => {
+      if (!this.playing) return this.base;
+      return this.base + (Date.now() - this.at) / 1e3;
+    };
+    this.isPlaying = () => this.playing;
+    this.subscribe = (listener) => {
+      this.listeners.add(listener);
+      if (this.listeners.size === 1) this.start();
+      return () => {
+        this.listeners.delete(listener);
+        if (this.listeners.size === 0) this.stop();
+      };
+    };
+    /** Forces a re-read from Spotify, e.g. after a seek or track change. */
+    this.resync = async () => {
+      if (this.syncing) return;
+      this.syncing = true;
+      try {
+        const progressMs = await Promise.resolve(import_spotifyplus3.SpotifyPlus.Player.getProgress());
+        if (typeof progressMs === "number" && Number.isFinite(progressMs)) {
+          this.base = progressMs / 1e3;
+          this.at = Date.now();
+        }
+        const state = await Promise.resolve(import_spotifyplus3.SpotifyPlus.Player.getState());
+        if (state && typeof state.isPlaying === "boolean") this.playing = state.isPlaying;
+      } catch (error) {
+        import_spotifyplus3.SpotifyPlus.warn("Spicy Lyrics: could not read playback position", error);
+      } finally {
+        this.syncing = false;
+      }
+    };
+  }
+  emit() {
+    for (const listener of [...this.listeners]) listener();
+  }
+  bindEvents() {
+    if (this.eventsBound) return;
+    this.eventsBound = true;
+    import_spotifyplus3.SpotifyPlus.Events.on("playPause", (payload) => {
+      this.base = this.now();
+      this.at = Date.now();
+      this.playing = !!payload?.isPlaying;
+      void this.resync();
+      this.emit();
+    });
+    import_spotifyplus3.SpotifyPlus.Events.on("trackSeeked", (payload) => {
+      if (typeof payload?.positionMs === "number") {
+        this.base = payload.positionMs / 1e3;
+        this.at = Date.now();
+      }
+      void this.resync();
+      this.emit();
+    });
+    import_spotifyplus3.SpotifyPlus.Events.on("songChanged", () => {
+      this.base = 0;
+      this.at = Date.now();
+      void this.resync();
+      this.emit();
+    });
+  }
+  start() {
+    this.bindEvents();
+    void this.resync();
+    this.tickTimer = setInterval(() => this.emit(), TICK_MS);
+    this.syncTimer = setInterval(() => void this.resync(), SYNC_MS);
+  }
+  stop() {
+    if (this.tickTimer !== null) clearInterval(this.tickTimer);
+    if (this.syncTimer !== null) clearInterval(this.syncTimer);
+    this.tickTimer = null;
+    this.syncTimer = null;
+  }
+};
+var clock = new PlaybackClock();
+
+// src/transform.ts
+var MIN_INTERLUDE = 4;
+var END_INTERLUDE_EARLY = 0.25;
+var RTL_CHARS = /[֐-ࣿיִ-﷿ﹰ-﻿]/g;
+var LETTER_LIKE = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ֐-ࣿיִ-﷿ﹰ-﻿぀-ヿ㐀-鿿가-힯]/g;
+function isRtlText(text) {
+  const rtl = text.match(RTL_CHARS)?.length ?? 0;
+  if (rtl === 0) return false;
+  const letters = text.match(LETTER_LIKE)?.length ?? rtl;
+  return rtl / Math.max(letters, 1) > 0.5;
+}
+var clean = (value) => {
+  const text = value?.trim();
+  return text ? text : void 0;
+};
+function groupWords(syllables) {
+  const words = [];
+  let current2 = null;
+  syllables.forEach((syllable, index) => {
+    if (!current2) current2 = { syllables: [], space: false };
+    current2.syllables.push({ text: syllable.Text, start: syllable.StartTime, end: syllable.EndTime });
+    const continues = !!syllable.IsPartOfWord && index < syllables.length - 1;
+    if (!continues) {
+      current2.space = index < syllables.length - 1;
+      words.push(current2);
+      current2 = null;
+    }
+  });
+  if (current2) words.push(current2);
+  return words;
+}
+function wordsToText(words) {
+  return words.map((word) => word.syllables.map((s) => s.text).join("") + (word.space ? " " : "")).join("").trim();
+}
+function joinOptional(syllables, pick) {
+  if (!syllables.some((s) => clean(pick(s)))) return void 0;
+  let out = "";
+  syllables.forEach((s, index) => {
+    out += pick(s) ?? s.Text;
+    if (index < syllables.length - 1 && !s.IsPartOfWord) out += " ";
+  });
+  return clean(out);
+}
+function vocalStart(lead, background) {
+  return Math.min(lead.StartTime, ...(background ?? []).map((b) => b.StartTime));
+}
+function vocalEnd(lead, background) {
+  return Math.max(lead.EndTime, ...(background ?? []).map((b) => b.EndTime));
+}
+function interlude(start, end) {
+  return { kind: "interlude", start, end };
+}
+function addInterludes(lines) {
+  if (lines.length === 0) return lines;
+  const out = [];
+  const first = lines[0];
+  if (first.kind === "vocal" && first.start >= MIN_INTERLUDE) {
+    out.push(interlude(0, first.start - END_INTERLUDE_EARLY));
+  }
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    out.push(line);
+    const next = lines[i + 1];
+    if (!next) continue;
+    if (line.kind === "interlude" || next.kind === "interlude") continue;
+    if (next.start - line.end >= MIN_INTERLUDE) {
+      out.push(interlude(line.end, next.start - END_INTERLUDE_EARLY));
+    }
+  }
+  return out;
+}
+function transformLyrics(lyrics) {
+  const writers = (lyrics.SongWriters ?? []).filter(Boolean);
+  if (lyrics.Type === "Static") {
+    const staticLines = lyrics.Lines.map((line) => line.Text ?? "");
+    return { type: "Static", lines: [], staticLines, writers, rtl: isRtlText(staticLines.join("\n")) };
+  }
+  const lines = [];
+  if (lyrics.Type === "Line") {
+    for (const item of lyrics.Content) {
+      if (item.Type === "Interlude") {
+        lines.push(interlude(item.StartTime, item.EndTime));
+        continue;
+      }
+      const text = (item.Text ?? "").trim();
+      const vocal = {
+        kind: "vocal",
+        start: item.StartTime,
+        end: item.EndTime,
+        opposite: !!item.OppositeAligned,
+        rtl: isRtlText(text),
+        text,
+        romanized: clean(item.RomanizedText) ?? clean(item.TransliteratedText),
+        translated: clean(item.TranslatedText)
+      };
+      lines.push(vocal);
+    }
+  } else {
+    for (const item of lyrics.Content) {
+      if (item.Type === "Interlude") {
+        lines.push(interlude(item.StartTime, item.EndTime));
+        continue;
+      }
+      const lead = item.Lead;
+      const words = groupWords(lead.Syllables ?? []);
+      const text = wordsToText(words);
+      const background = (item.Background ?? []).map((b) => wordsToText(groupWords(b.Syllables ?? []))).filter(Boolean).join(" ");
+      const vocal = {
+        kind: "vocal",
+        start: vocalStart(lead, item.Background),
+        end: vocalEnd(lead, item.Background),
+        opposite: !!item.OppositeAligned,
+        rtl: isRtlText(text),
+        text,
+        words,
+        romanized: joinOptional(lead.Syllables ?? [], (s) => s.RomanizedText) ?? joinOptional(lead.Syllables ?? [], (s) => s.TransliteratedText),
+        translated: clean(item.TranslatedText) ?? clean(lead.TranslatedText),
+        background: background || void 0
+      };
+      lines.push(vocal);
+    }
+  }
+  const rtl = isRtlText(lines.map((l) => l.kind === "vocal" ? l.text : "").join("\n"));
+  return { type: lyrics.Type, lines: addInterludes(lines), staticLines: [], writers, rtl };
+}
+function findActiveIndex(lines, position) {
+  let low = 0;
+  let high = lines.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const middle = low + high >> 1;
+    if (lines[middle].start <= position) {
+      found = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (found >= 0 && found === lines.length - 1 && position > lines[found].end + 8) return -1;
+  return found;
+}
+function progress(position, start, end) {
+  if (end <= start) return position >= start ? 1 : 0;
+  return Math.min(1, Math.max(0, (position - start) / (end - start)));
+}
+
+// src/ui/colors.ts
+function white(alpha) {
+  const clamped = Math.min(1, Math.max(0, alpha));
+  const hex = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
+  return `#${hex}FFFFFF`;
+}
+var COLORS = {
+  background: "#FF0B0B0F",
+  surface: "#1FFFFFFF",
+  pressed: "#29FFFFFF",
+  future: white(0.38),
+  past: white(0.6),
+  active: white(1),
+  unsung: white(0.4),
+  secondary: white(0.55),
+  accent: "#FFFFFFFF"
+};
+var easeOut = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 2);
+
+// src/ui/hooks.ts
+var import_react = require("react");
+var import_spotifyplus4 = require("spotifyplus");
+function usePrefs() {
+  return (0, import_react.useSyncExternalStore)(subscribePrefs, getPrefs, getPrefs);
+}
+function rowSnapshot(position, start, activeUntil) {
+  if (position < start) return 0;
+  if (position >= activeUntil) return 1;
+  return 2 + Math.floor((position - start) * 10);
+}
+function useRowSnapshot(start, activeUntil) {
+  const get = () => rowSnapshot(clock.now(), start, activeUntil);
+  return (0, import_react.useSyncExternalStore)(clock.subscribe, get, get);
+}
+function readCurrentTrack() {
+  try {
+    return import_spotifyplus4.SpotifyPlus.Player.getCurrentTrack() ?? null;
+  } catch {
+    return null;
+  }
+}
+function useCurrentTrack() {
+  const [track, setTrack] = (0, import_react.useState)(readCurrentTrack);
+  (0, import_react.useEffect)(() => {
+    let disposed = false;
+    const handler = (payload) => {
+      const current2 = readCurrentTrack();
+      if (current2 && (!payload?.uri || current2.uri === payload.uri)) {
+        if (!disposed) setTrack(current2);
+        return;
+      }
+      if (payload?.uri) {
+        void import_spotifyplus4.SpotifyPlus.Internal.getTrack(payload.uri).then((found) => {
+          if (!disposed && found) setTrack(found);
+        });
+      } else if (!disposed) {
+        setTrack(current2);
+      }
+    };
+    import_spotifyplus4.SpotifyPlus.Events.on("songChanged", handler);
+    return () => {
+      disposed = true;
+      import_spotifyplus4.SpotifyPlus.Events.off("songChanged", handler);
+    };
+  }, []);
+  return track;
+}
+function trackIdOf(track) {
+  if (!track) return null;
+  if (track.id) return track.id;
+  const parts = track.uri?.split(":") ?? [];
+  return parts.length === 3 && parts[1] === "track" ? parts[2] : null;
+}
+function useLyrics(trackId, attempt) {
+  const [state, setState] = (0, import_react.useState)({ status: "loading" });
+  (0, import_react.useEffect)(() => {
+    if (!trackId) {
+      setState({ status: "error", reason: "not-found", detail: "This item has no lyrics." });
+      return;
+    }
+    let cancelled = false;
+    setState({ status: "loading" });
+    void fetchLyrics(trackId, () => cancelled).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        if (result.reason === "cancelled") return;
+        setState({ status: "error", reason: result.reason, httpStatus: result.status, detail: result.detail });
+        return;
+      }
+      try {
+        setState({ status: "ready", display: transformLyrics(result.lyrics), from: result.from });
+      } catch (error) {
+        import_spotifyplus4.SpotifyPlus.error("Spicy Lyrics: could not read the lyrics data", error);
+        setState({ status: "error", reason: "bad-response", detail: error?.message });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [trackId, attempt]);
+  return state;
+}
+function describeFailure(reason, httpStatus, detail) {
+  const code = httpStatus ? ` (HTTP ${httpStatus})` : "";
+  switch (reason) {
+    case "no-token":
+      return "Couldn't read your Spotify session. Try again in a moment.";
+    case "unauthorized":
+      return `The lyrics service refused this request${code}.`;
+    case "not-found":
+      return detail ?? "No lyrics found for this song.";
+    case "rate-limited":
+      return "The lyrics service is limiting requests right now. Try again shortly.";
+    case "queued":
+      return "These lyrics are still being prepared. Try again in a moment.";
+    case "network":
+      return `Couldn't reach the lyrics service.${detail ? ` ${detail}` : ""}`;
+    case "unsupported-format":
+      return detail ?? "The lyrics came in a format this version cannot read.";
+    default:
+      return `Unexpected response from the lyrics service${code}.${detail ? ` ${detail}` : ""}`;
+  }
+}
+
+// src/ui/Rows.tsx
+var import_react2 = require("react");
+var import_react3 = require("spotifyplus/react");
+var import_spotifyplus5 = require("spotifyplus");
+var import_jsx_runtime = require("react/jsx-runtime");
+var BASE_FONT = 30;
+function seekTo(seconds) {
+  try {
+    import_spotifyplus5.SpotifyPlus.Player.seek(Math.max(0, seconds) * 1e3);
+  } catch (error) {
+    import_spotifyplus5.SpotifyPlus.warn("Spicy Lyrics: seek failed", error);
+  }
+}
+function VocalRowBase({ line, activeUntil, prefs }) {
+  const snap = useRowSnapshot(line.start, activeUntil);
+  const state = snap === 0 ? "future" : snap === 1 ? "past" : "active";
+  const fontSize = BASE_FONT * prefs.fontScale;
+  const alignRight = line.rtl !== line.opposite;
+  const align = alignRight ? "flex-end" : "flex-start";
+  const textAlign = alignRight ? "right" : "left";
+  const lineColor = state === "active" ? COLORS.active : state === "past" ? COLORS.past : COLORS.future;
+  const position = clock.now();
+  const syllableMode = state === "active" && prefs.animateSyllables && !!line.words && line.words.length > 0;
+  const lead = syllableMode ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row", flexWrap: "wrap", justifyContent: align }, children: line.words.map((word, wordIndex) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row" }, children: word.syllables.map((syllable, syllableIndex) => {
+    const last = syllableIndex === word.syllables.length - 1;
+    const fill = easeOut(progress(position, syllable.start, syllable.end));
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      import_react3.Text,
+      {
+        style: {
+          color: white(0.4 + 0.6 * fill),
+          fontSize,
+          fontWeight: "800",
+          textAlign
+        },
+        children: syllable.text + (last && word.space ? " " : "")
+      },
+      syllableIndex
+    );
+  }) }, wordIndex)) }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: lineColor, fontSize, fontWeight: "800", textAlign }, children: line.text });
+  const secondaryColor = state === "active" ? COLORS.secondary : white(0.28);
+  const showRomanized = prefs.showRomanization && !!line.romanized && line.romanized !== line.text;
+  const showTranslated = prefs.showTranslation && !!line.translated;
+  const showBackground = prefs.showBackgroundVocals && !!line.background;
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+    import_react3.Pressable,
+    {
+      onPress: () => seekTo(line.start),
+      style: { paddingVertical: 10, paddingHorizontal: 6, borderRadius: 18, alignItems: align },
+      children: [
+        lead,
+        showBackground && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          import_react3.Text,
+          {
+            style: {
+              color: state === "active" ? white(0.7) : white(0.25),
+              fontSize: fontSize * 0.6,
+              fontStyle: "italic",
+              fontWeight: "700",
+              marginTop: 4,
+              textAlign
+            },
+            children: line.background
+          }
+        ),
+        showRomanized && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 4, textAlign }, children: line.romanized }),
+        showTranslated && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: secondaryColor, fontSize: fontSize * 0.55, marginTop: 4, textAlign }, children: line.translated })
+      ]
+    }
+  );
+}
+var VocalRow = (0, import_react2.memo)(VocalRowBase);
+function InterludeRowBase({ line, activeUntil, prefs }) {
+  const snap = useRowSnapshot(line.start, activeUntil);
+  if (snap < 2) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { height: 14 } });
+  const t = progress(clock.now(), line.start, line.end);
+  const size = 26 * prefs.fontScale;
+  const dot = (index) => {
+    const local = Math.min(1, Math.max(0, t * 3 - index));
+    return white(0.25 + 0.75 * easeOut(local));
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.View, { style: { flexDirection: "row", paddingVertical: 12, paddingHorizontal: 10 }, children: [0, 1, 2].map((index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react3.Text, { style: { color: dot(index), fontSize: size, marginRight: 8 }, children: "\u25CF" }, index)) });
+}
+var InterludeRow = (0, import_react2.memo)(InterludeRowBase);
+
+// src/ui/Page.tsx
+var import_jsx_runtime2 = require("react/jsx-runtime");
+var Boundary = class extends import_react4.default.Component {
+  constructor() {
+    super(...arguments);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error) {
+    import_spotifyplus6.SpotifyPlus.error("Spicy Lyrics: the lyrics page crashed, showing the original page", error);
+  }
+  render() {
+    if (this.state.failed) {
+      const Original = this.props.Original;
+      return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Original, {});
+    }
+    return this.props.children;
+  }
+};
+function SpicyLyricsPage(props) {
+  const prefs = usePrefs();
+  if (!prefs.enabled) {
+    const Original = props.Original;
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Original, {});
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Boundary, { Original: props.Original, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(LyricsScreen, { prefs }) });
+}
+function goBack() {
+  try {
+    import_spotifyplus6.SpotifyPlus.Navigation.back();
+  } catch (error) {
+    import_spotifyplus6.SpotifyPlus.warn("Spicy Lyrics: back navigation failed", error);
+  }
+}
+function Header({ title, artist, image }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 28, paddingBottom: 10 }, children: [
+    image ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Image, { source: { uri: image }, style: { width: 56, height: 56, borderRadius: 8 } }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, marginLeft: image ? 14 : 0 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { numberOfLines: 1, style: { color: COLORS.active, fontSize: 18, fontWeight: "700" }, children: title }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { numberOfLines: 1, style: { color: COLORS.secondary, fontSize: 14, marginTop: 2 }, children: artist })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Pressable, { onPress: goBack, style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 22 }, children: "\u2715" }) })
+  ] });
+}
+function Notice({ message, onRetry }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 18, fontWeight: "700", textAlign: "center" }, children: message }),
+    onRetry ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      import_react5.Pressable,
+      {
+        onPress: onRetry,
+        style: { marginTop: 18, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22, backgroundColor: COLORS.surface },
+        children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: COLORS.active, fontSize: 15, fontWeight: "700" }, children: "Try again" })
+      }
+    ) : null
+  ] });
+}
+function Credits({ writers }) {
+  if (writers.length === 0) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { height: 120 } });
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.View, { style: { paddingHorizontal: 12, paddingTop: 28, paddingBottom: 140 }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.Text, { style: { color: white(0.5), fontSize: 14 }, children: `Written by ${writers.join(", ")}` }) });
+}
+function StaticLyrics({ display, prefs }) {
+  const align = display.rtl ? "right" : "left";
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.ScrollView, { style: { flex: 1 }, contentContainerStyle: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 60 }, children: [
+    display.staticLines.map((text, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      import_react5.Text,
+      {
+        style: { color: COLORS.active, fontSize: 24 * prefs.fontScale, fontWeight: "700", textAlign: align, marginBottom: text ? 10 : 22 },
+        children: text
+      },
+      index
+    )),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers })
+  ] });
+}
+function SyncedLyrics({ display, prefs }) {
+  const listRef = (0, import_react4.useRef)(null);
+  const lines = display.lines;
+  (0, import_react4.useEffect)(() => {
+    let last = -2;
+    const check = () => {
+      const index = findActiveIndex(lines, clock.now());
+      if (index === last) return;
+      last = index;
+      if (index >= 0) {
+        try {
+          listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
+        } catch (error) {
+          import_spotifyplus6.SpotifyPlus.warn("Spicy Lyrics: scroll failed", error);
+        }
+      }
+    };
+    check();
+    return clock.subscribe(check);
+  }, [lines]);
+  const renderItem = (0, import_react4.useCallback)(
+    ({ item, index }) => {
+      const next = lines[index + 1];
+      const activeUntil = Math.max(item.end, next ? next.start : item.end + 8);
+      return item.kind === "interlude" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(InterludeRow, { line: item, activeUntil, prefs }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(VocalRow, { line: item, activeUntil, prefs });
+    },
+    [lines, prefs]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    import_react5.FlatList,
+    {
+      ref: listRef,
+      style: { flex: 1 },
+      data: lines,
+      keyExtractor: (_, index) => String(index),
+      renderItem,
+      initialNumToRender: 8,
+      windowSize: 4,
+      estimatedItemSize: 96,
+      contentContainerStyle: { paddingHorizontal: 16, paddingTop: 30 },
+      ListFooterComponent: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Credits, { writers: display.writers })
+    }
+  );
+}
+function LyricsScreen({ prefs }) {
+  const track = useCurrentTrack();
+  const [attempt, setAttempt] = (0, import_react4.useState)(0);
+  const state = useLyrics(trackIdOf(track), attempt);
+  let body;
+  if (state.status === "loading") {
+    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Notice, { message: "Loading lyrics..." });
+  } else if (state.status === "error") {
+    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      Notice,
+      {
+        message: describeFailure(state.reason, state.httpStatus, state.detail),
+        onRetry: state.reason === "not-found" ? void 0 : () => setAttempt((n) => n + 1)
+      }
+    );
+  } else if (state.display.type === "Static") {
+    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(StaticLyrics, { display: state.display, prefs });
+  } else {
+    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(SyncedLyrics, { display: state.display, prefs }, trackIdOf(track) ?? "none");
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_react5.View, { style: { flex: 1, backgroundColor: COLORS.background }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Header, { title: track?.title ?? "Spicy Lyrics", artist: track?.artist ?? "", image: track?.album?.image }),
+    body
+  ] });
+}
+
+// src/index.tsx
+function registerSettings() {
+  const prefs = getPrefs();
+  import_spotifyplus7.SpotifyPlus.Settings.registerSettings([
+    {
+      title: "Spicy Lyrics",
+      description: "Synced lyrics from the Spicy Lyrics service. Unofficial port of Spicy Lyrics by Spikerko.",
+      items: [
+        {
+          id: "enabled",
+          type: "toggle",
+          label: "Use Spicy Lyrics",
+          description: "When off, Spotify's own lyrics page is shown.",
+          value: prefs.enabled
+        },
+        {
+          id: "animateSyllables",
+          type: "toggle",
+          label: "Word-by-word highlight",
+          description: "Fade each word in as it is sung (when the song has word timings).",
+          value: prefs.animateSyllables
+        },
+        {
+          id: "showBackgroundVocals",
+          type: "toggle",
+          label: "Background vocals",
+          value: prefs.showBackgroundVocals
+        },
+        {
+          id: "showRomanization",
+          type: "toggle",
+          label: "Romanization",
+          description: "Show a romanized line under songs in other scripts, when the service provides one.",
+          value: prefs.showRomanization
+        },
+        {
+          id: "showTranslation",
+          type: "toggle",
+          label: "Translation",
+          description: "Show a translated line, when the service provides one.",
+          value: prefs.showTranslation
+        },
+        {
+          id: "fontScale",
+          type: "slider",
+          label: "Text size",
+          value: prefs.fontScale,
+          min: 0.7,
+          max: 1.5,
+          step: 0.05
+        },
+        {
+          id: "apiVersion",
+          type: "text",
+          label: "API client version",
+          description: "Advanced. The client version sent to the lyrics service.",
+          value: prefs.apiVersion,
+          placeholder: "5.22.3"
+        },
+        {
+          id: "clearCache",
+          type: "button",
+          label: "Clear lyrics cache",
+          buttonLabel: "Clear"
+        }
+      ]
+    }
+  ]);
+  import_spotifyplus7.SpotifyPlus.Events.on("settings.changed", (setting) => {
+    if (setting.id === "clearCache") {
+      clearLyricsCache();
+      return;
+    }
+    const id = setting.id;
+    if (!isPrefKey(id)) return;
+    if (id === "apiVersion" && typeof setting.value === "string" && !setting.value.trim()) return;
+    setPref(id, setting.value);
+  });
+}
+registerSettings();
+import_spotifyplus7.SpotifyPlus.UI.replace("lyrics.page", SpicyLyricsPage);
+import_spotifyplus7.SpotifyPlus.log("Spicy Lyrics loaded");

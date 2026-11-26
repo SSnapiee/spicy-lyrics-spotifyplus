@@ -1,0 +1,19 @@
+{
+  "id": "dev.spicylyrics.spotifyplus",
+  "name": "Spicy Lyrics",
+  "description": "Synced word-by-word lyrics from the Spicy Lyrics service, with background vocals, duet alignment and interludes. Unofficial port of Spicy Lyrics by Spikerko.",
+  "version": "0.1.0",
+  "main": "index.js",
+  "author": [
+    {
+      "name": "Spicy Lyrics by Spikerko (unofficial port)",
+      "url": "https://github.com/Spikerko/spicy-lyrics"
+    }
+  ],
+  "api": 2,
+  "permissions": [],
+  "assets": [],
+  "tags": [
+    "lyrics"
+  ]
+}
